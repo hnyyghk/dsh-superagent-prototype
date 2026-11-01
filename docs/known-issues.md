@@ -128,3 +128,30 @@ currentNode = node
 `'**'` 既不等于任何路径，也不以 `.**` / `.*` 结尾，旧的 `patternMatches` 直接
 `return false`。所以订阅 `**` 等于什么都没订阅。已在 `vendor/msp-ts` 里补上
 `pattern === '**' || pattern === '*'`（应向上游反馈）。
+
+---
+
+## K7. 单账号部署：GitHub 来源把每条事件都当成智能体自己发的，静默丢弃
+
+**位置**：`src/sources/github.ts` 的 `readStream()`（仓库级 issues / comments 流）与 `intakeComments()`（通知、订阅线程的评论）
+
+```ts
+if (sameName(item.user.login, login)) continue
+```
+
+**症状**：`kv` 里 `github-since`、`github-stream:*` 游标照常前进，来源 health 仍是 `ready`（`0 notifications; next poll ≥ 60s`），
+但 `trigger` / `disposition` / `thread` 全是 0 行，面板「到达 0 / 被过滤 0」。在监听的仓库里新建 Issue、发评论都没有反应。
+
+**原因**：来源按设计丢弃「智能体自己的 GitHub 账号」发出的事件（`docs/001-domain.md`、`docs/008-cookbook.md`：Source 在进入领域前
+丢掉 bot 自己的消息），这要求智能体有独立账号（`docs/006-deployment.md` 的 Agent GitHub account）。若 `gh api user` 登录的账号
+就是发请求的账号（单账号部署），每条事件都属于「自己发的」，在入库前被静默丢弃 —— 不生成 trigger，也不写 disposition，
+所以连「被过滤」都是 0。
+
+**判定方法**：`gh api user --jq .login` 与 Issue / 评论作者比对；面板 GitHub 卡片的 facts「当前账号 @…」是同一个值。
+
+**修法**：
+1. 给智能体一个独立的 GitHub 账号（`docs/006-deployment.md`），人用另一个账号发请求；
+2. 本版起，被忽略的条数写进来源 health：`3 from @<账号> (the agent's own account) ignored`，单账号部署不再无迹可循。
+
+**是否支持单账号部署是产品决策**：要区分「智能体自己发的回复」和「人用同一账号提的请求」，只能靠 outbox 的
+`<!-- dsh-superagent:… -->` marker 或提示词首行这类信号，而且智能体自己开的 PR / 评论有回环风险，不能在没有决策的情况下改。

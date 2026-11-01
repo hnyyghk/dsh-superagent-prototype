@@ -637,6 +637,7 @@ interface Round {
   failures: string[];
   dropped: number[];
   abandoned: number[];
+  own: number;
   tally: Tally;
 }
 interface Retry {
