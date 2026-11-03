@@ -1,5 +1,5 @@
 // 在 Windows 上从另一个 MSP 节点发一条信号，验证 msp-ts 进程内订阅能收到。
-import { MSPNode } from './vendor/msp-ts/dist/index.js'
+import { MSPNode } from '../../vendor/msp-ts/dist/index.js'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
