@@ -361,6 +361,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/sources/kind.ts` | The `SourceKind` protocol |
 | `src/sources/registry.ts` | `SourceRegistry` |
 | `src/sources/host.ts` | `SourceHost`, `SourceContext`, `Health`, `health` and the fixed health texts |
+| `src/sources/im.ts` | The generic IM contract — `ImAdapter`, `ImEvent`, `ImConfig` — and `defineImKind`, which turns an adapter into a kind: scope, replies, Thread context, Policy rows, environment, chat names and `<platform>-pipeline` health. `imTrigger` names a message as a Trigger, so a live delivery and a backfill of it reach one Trigger |
 | `src/sources/poll.ts` | What GitHub and Feishu polling share: `POLL_HORIZON_MS`, `polled`, `cursorAt`, and `pollThreads`, which keeps a failure on its Thread as `pollError` |
 | `src/sources/github.ts` | The GitHub kind and plugin entry, exported as `./github-watch`: a poll round of notifications, the pull requests of open Tickets with their CI, and subscribed Threads |
 | `src/sources/github-trigger.ts` | GitHub comments, reviews, Issue bodies and CI changes as Triggers, and GitHub addresses |
@@ -413,6 +414,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/msp.test.mjs` | The MSP Source: signal→Trigger mapping, the senderless machine actor, the ambient admission row, deterministic ids |
 | `tests/experience-tools.spec.ts` | The experience tools: the level a create lands on, the refused downgrade, and ids that stay inside the experience directory |
 | `tests/registry.spec.ts` | `SourceRegistry`: instances, validation, Policy parts, Channels and Thread context |
+| `tests/im.spec.ts` | The generic IM kind from a fake adapter: configuration defaults and the chat-ID pattern, scope per chat and for direct messages, deterministic Trigger and Thread IDs, the replied-to Trigger, Policy rows, refreshed chat names and the chat environment variable |
 | `tests/sources.spec.ts` | The Feishu and GitHub Sources on a `SourceContext`: translation, polls and read positions, the pull request rules, health |
 | `tests/commands.spec.ts` | CLI calls as the deployment's accounts, the Channels' answers, and repository-scoped GitHub calls |
 | `tests/feishu-read.spec.ts`, `tests/github-read.spec.ts` | Feishu and GitHub reads |
