@@ -1,5 +1,9 @@
 # dsh-superagent-reactive
 
+<p align="center">
+  <img src="assets/banner.png" alt="ReActive：一个会「听」的 ReAct —— 本机感知 · 经验 · 多任务调度" />
+</p>
+
 [![MSP 2026-10-10](https://modelsensingprotocol.github.io/msp-site/badges/msp-2026-10-10.svg)](https://modelsensingprotocol.github.io/msp-site/docs/spec/) [![license](https://img.shields.io/github/license/hxh230802/dsh-superagent-prototype)](LICENSE) [![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](INSTALL.md) [![contributors](https://img.shields.io/github/contributors/hxh230802/dsh-superagent-prototype)](#贡献者)
 <br/>
 [![node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-339933?logo=nodedotjs&logoColor=white)](package.json) [![pnpm](https://img.shields.io/badge/pnpm-11.7.0-F69220?logo=pnpm&logoColor=white)](package.json) [![dsh](https://img.shields.io/badge/dsh-%5E0.2.1--alpha.2-5B4B8A)](package.json) [![tests](https://img.shields.io/badge/tests-1202%20cases-6E9F18?logo=vitest&logoColor=white)](tests)
