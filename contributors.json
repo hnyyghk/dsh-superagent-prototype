@@ -3,7 +3,7 @@
   "people": [
     { "name": "hxh230802", "login": "hxh230802", "maintainer": true },
     { "name": "Linjiangxian0203", "login": "Linjiangxian0203", "maintainer": true },
-    { "name": "guguthecoder", "login": "guguthecoder" },
+    { "name": "guguthecoder", "login": "guguthecoder", "maintainer": true },
     { "name": "912D", "login": "912D" }
   ]
 }

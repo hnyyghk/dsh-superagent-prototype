@@ -30,16 +30,11 @@ export const END_MARKER = '<!-- contributors:end -->'
 const LOGIN = /^[A-Za-z0-9-]+$/
 const HTTP = /^https?:\/\//i
 
-/** 机器人也进墙，只是副标题里标出来：谁看都知道这行不是人。 */
-const autoNote = (entry) => `${Number(entry.contributions) || 0} 次提交${entry.bot ? ' · 机器人' : ''}`
-
-/** 副标题的组装顺序：身份（维护者）在前，然后是提交数。 */
-const noteOf = (maintainer, entry) => {
-  const parts = []
-  if (maintainer) parts.push('维护者')
-  if (entry) parts.push(autoNote(entry))
-  return parts.length ? parts.join(' · ') : undefined
-}
+/**
+ * 副标题：身份在前，提交数在后。
+ * 身份只有三种：维护者（contributors.json 里标了）、机器人（GitHub 的 Bot）、其余都是贡献者。
+ */
+const noteFor = (role, entry) => (entry ? `${role} · ${Number(entry.contributions) || 0} 次提交` : role)
 
 /**
  * 从 `git remote get-url origin` 的各种写法里取出 `owner/repo`。
@@ -152,6 +147,7 @@ export function buildCards(people, discovered, { onWarn = () => {} } = {}) {
     for (const id of [key, found?.login.toLowerCase()]) {
       if (id) taken.add(id)
     }
+    const role = person.maintainer ? '维护者' : found?.bot ? '机器人' : '贡献者'
     cards.push({
       name: person.name,
       url: person.url ?? found?.url ?? (person.login ? `https://github.com/${person.login}` : undefined),
@@ -159,15 +155,25 @@ export function buildCards(people, discovered, { onWarn = () => {} } = {}) {
         person.avatar ??
         found?.avatar ??
         (person.login ? `https://github.com/${person.login}.png` : identicon(person.name)),
-      note: person.note ?? noteOf(person.maintainer, found),
+      note: person.note ?? noteFor(role, found),
       bot: found?.bot ?? false,
       maintainer: Boolean(person.maintainer),
+      role,
     })
   }
 
   for (const entry of discovered) {
     if (taken.has(entry.login.toLowerCase())) continue
-    cards.push({ name: entry.login, url: entry.url, avatar: entry.avatar, note: autoNote(entry), bot: entry.bot, maintainer: false })
+    const role = entry.bot ? '机器人' : '贡献者'
+    cards.push({
+      name: entry.login,
+      url: entry.url,
+      avatar: entry.avatar,
+      note: noteFor(role, entry),
+      bot: entry.bot,
+      maintainer: false,
+      role,
+    })
   }
   return cards
 }

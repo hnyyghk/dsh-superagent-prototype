@@ -38,7 +38,7 @@ const declared = {
   people: [
     { name: 'hxh230802', login: 'hxh230802', maintainer: true },
     { name: 'Linjiangxian0203', login: 'Linjiangxian0203', maintainer: true },
-    { name: 'guguthecoder', login: 'guguthecoder' },
+    { name: 'guguthecoder', login: 'guguthecoder', maintainer: true },
     { name: '912D', login: '912D' },
   ],
 }
@@ -111,29 +111,30 @@ describe('contributors: 名单文件', () => {
 })
 
 describe('contributors: 声明 + 发现 合并', () => {
-  it('仓库里四个人都在：两个维护者在前（按加入顺序），其余在后', () => {
+  it('仓库里四个人都在：三个维护者在前（按加入顺序），其余标贡献者', () => {
     const cards = buildCards(normalizeCredits(declared).people, discovered)
     assert.deepEqual(
       cards.map((card) => [card.name, card.note]),
       [
         ['hxh230802', '维护者 · 53 次提交'],
         ['Linjiangxian0203', '维护者 · 1 次提交'],
-        ['guguthecoder', '5 次提交'],
-        ['912D', '1 次提交'],
+        ['guguthecoder', '维护者 · 5 次提交'],
+        ['912D', '贡献者 · 1 次提交'],
       ],
     )
   })
 
-  it('机器人排在人后面，副标题写明是机器人', () => {
+  it('机器人排在人后面，身份写「机器人」', () => {
     const cards = buildCards(normalizeCredits(declared).people, withBot)
     assert.equal(cards.length, 5)
     assert.deepEqual(cards.at(-1), {
       name: 'github-actions[bot]',
       url: 'https://github.com/apps/github-actions',
       avatar: 'https://avatars.githubusercontent.com/in/15368?v=4',
-      note: '1 次提交 · 机器人',
+      note: '机器人 · 1 次提交',
       bot: true,
       maintainer: false,
+      role: '机器人',
     })
   })
 
@@ -157,13 +158,14 @@ describe('contributors: 声明 + 发现 合并', () => {
     assert.equal(cards[0].note, '维护者 · 53 次提交')
   })
 
-  it('两个维护者都在最前，组内按声明顺序（= 加入顺序）', () => {
+  it('三个维护者都在最前，组内按声明顺序（= 加入顺序）', () => {
     const cards = buildCards(normalizeCredits(declared).people, discovered)
     assert.deepEqual(
-      cards.slice(0, 2).map((card) => [card.name, card.maintainer]),
+      cards.slice(0, 3).map((card) => [card.name, card.maintainer]),
       [
         ['hxh230802', true],
         ['Linjiangxian0203', true],
+        ['guguthecoder', true],
       ],
     )
   })
@@ -208,7 +210,7 @@ describe('contributors: 声明 + 发现 合并', () => {
 
   it('声明的 login 在 API 里查不到时仍然显示，只是没有提交数', () => {
     const [card] = buildCards([{ name: 'Moved', login: 'moved' }], [])
-    assert.equal(card.note, undefined)
+    assert.equal(card.note, '贡献者')
     assert.equal(card.url, 'https://github.com/moved')
   })
 })
