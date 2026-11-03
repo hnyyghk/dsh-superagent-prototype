@@ -17,6 +17,8 @@ export const record = <V>(key: string) => key as Key<V>
 export function family<V, A extends unknown[] = [string]>(prefix: string, format = (...name: A) => name.join(':')): Family<V, A> {
   return Object.assign((...name: A) => `${prefix}${format(...name)}` as Key<V>, { prefix })
 }
+/** Which kind of chat an IM Source message came from: a group chat, or a one-to-one conversation. */
+export type ImConversation = 'group' | 'private'
 
 export const KV = {
   /** Store: current database schema version. */
@@ -55,4 +57,11 @@ export const KV = {
   feishu: { chats: record<Record<string, boolean>>('feishu-chats'), history: family<string, [chat: string]>('feishu-history:'),
     topics: family<Record<string, string>, [chat: string]>('feishu-history-threads:'),
     seen: family<string[], [thread: string]>('thread-seen:'), initialized: family<boolean, [thread: string]>('thread-initialized:') },
+  /**
+   * IM Sources registered through the generic IM adapter contract: chats seen per platform (channel ID to conversation,
+   * kept so backfill survives a restart), and each chat's backfill cursor (the newest `at` delivered so far). Chat display
+   * names reuse `sources.labels(platform)`.
+   */
+  im: { chats: family<Record<string, ImConversation>, [platform: string]>('im-chats:'),
+    history: family<string, [platform: string, conversation: ImConversation, channelId: string]>('im-history:') },
 }
