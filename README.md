@@ -168,11 +168,11 @@ enabled: true
 <table>
   <tr>
     <td align="center">
-      <a href="https://github.com/hxh230802"><img src="https://avatars.githubusercontent.com/u/106608151?v=4" width="72" height="72" alt="hxh230802" title="hxh230802 · 维护者 · 59 次提交" /></a>
+      <a href="https://github.com/hxh230802"><img src="https://avatars.githubusercontent.com/u/106608151?v=4" width="72" height="72" alt="hxh230802" title="hxh230802 · 维护者 · 62 次提交" /></a>
       <br />
       <sub><b>hxh230802</b></sub>
       <br />
-      <sub>维护者 · 59 次提交</sub>
+      <sub>维护者 · 62 次提交</sub>
     </td>
     <td align="center">
       <a href="https://github.com/Linjiangxian0203"><img src="https://avatars.githubusercontent.com/u/149987761?v=4" width="72" height="72" alt="Linjiangxian0203" title="Linjiangxian0203 · 维护者 · 1 次提交" /></a>
@@ -182,11 +182,11 @@ enabled: true
       <sub>维护者 · 1 次提交</sub>
     </td>
     <td align="center">
-      <a href="https://github.com/guguthecoder"><img src="https://avatars.githubusercontent.com/u/175189242?v=4" width="72" height="72" alt="guguthecoder" title="guguthecoder · 维护者 · 7 次提交" /></a>
+      <a href="https://github.com/guguthecoder"><img src="https://avatars.githubusercontent.com/u/175189242?v=4" width="72" height="72" alt="guguthecoder" title="guguthecoder · 维护者 · 8 次提交" /></a>
       <br />
       <sub><b>guguthecoder</b></sub>
       <br />
-      <sub>维护者 · 7 次提交</sub>
+      <sub>维护者 · 8 次提交</sub>
     </td>
     <td align="center">
       <a href="https://github.com/912D"><img src="https://avatars.githubusercontent.com/u/347679655?v=4" width="72" height="72" alt="912D" title="912D · 贡献者 · 1 次提交" /></a>
@@ -196,11 +196,11 @@ enabled: true
       <sub>贡献者 · 1 次提交</sub>
     </td>
     <td align="center">
-      <a href="https://github.com/apps/github-actions"><img src="https://avatars.githubusercontent.com/in/15368?v=4" width="72" height="72" alt="github-actions[bot]" title="github-actions[bot] · 机器人 · 2 次提交" /></a>
+      <a href="https://github.com/apps/github-actions"><img src="https://avatars.githubusercontent.com/in/15368?v=4" width="72" height="72" alt="github-actions[bot]" title="github-actions[bot] · 机器人 · 3 次提交" /></a>
       <br />
       <sub><b>github-actions[bot]</b></sub>
       <br />
-      <sub>机器人 · 2 次提交</sub>
+      <sub>机器人 · 3 次提交</sub>
     </td>
   </tr>
 </table>
