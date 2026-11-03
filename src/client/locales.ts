@@ -747,6 +747,9 @@ const TEXT = {
   'healthCode.feishuCliUnset': ['来源已打开，还没有设置机器人的 lark-cli', HEALTH_TEXT.feishuCliUnset],
   'healthCode.feishuBotMissing': ['等待飞书机器人', HEALTH_TEXT.feishuBotMissing],
   'healthCode.pollFailures': ['连续 {count} 次轮询失败，最近一次：{error}', HEALTH_TEXT.pollFailures],
+  'healthCode.adapterSilent': ['适配器没有报告这个健康项', HEALTH_TEXT.adapterSilent],
+  'healthCode.pipelineFailures': ['{count} 条消息没能送达，最近一次：{error}', HEALTH_TEXT.pipelineFailures],
+  'healthCode.pipelineDisconnected': ['连接已断开，正在重连', HEALTH_TEXT.pipelineDisconnected],
 } as const satisfies Record<string, readonly [string, string]>
 export type DshSuperagentKey = keyof typeof TEXT
 const language = (index: 0 | 1) => Object.fromEntries(Object.entries(TEXT).map(([key, pair]) => [key, pair[index]])) as Record<DshSuperagentKey, string>

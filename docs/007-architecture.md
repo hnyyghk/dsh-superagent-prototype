@@ -325,6 +325,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/versions.ts` | `Versions`: a record kept as numbered snapshots with a pointer to the current one, for the settings and the prompts |
 | `src/app/cache.ts` | `TextCache`: texts kept in memory within a size, the least recently used dropped first |
 | `src/app/settings.ts` | Settings |
+| `src/app/im.ts` | `ImRegistry`: one registration per IM platform, serialized so a reload replaces rather than collides with the old one; the subscribe loop with backoff, one message's failure isolated from the next, health trimmed to the entries the adapter declared, and a 60s backfill of each conversation's history that starts its cursor on first sight |
 | `src/app/settings-history.ts` | `policyHistory`: each saved settings revision with what it changed from the one before |
 | `src/app/prompts.ts` | Prompts, `builtInParts`, the built-in parts a team may override, and `promptParts`, the order of a role's prompt sections |
 | `src/app/context.ts` | The built-in prompt text, read from `prompts/`, and the transcript entries Sessions read |
@@ -415,6 +416,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/experience-tools.spec.ts` | The experience tools: the level a create lands on, the refused downgrade, and ids that stay inside the experience directory |
 | `tests/registry.spec.ts` | `SourceRegistry`: instances, validation, Policy parts, Channels and Thread context |
 | `tests/im.spec.ts` | The generic IM kind from a fake adapter: configuration defaults and the chat-ID pattern, scope per chat and for direct messages, deterministic Trigger and Thread IDs, the replied-to Trigger, Policy rows, refreshed chat names and the chat environment variable |
+| `tests/im-registry.spec.ts` | `ImRegistry`: replacing a platform's registration without colliding, the replaced disposer leaving the new one alone, one failing message not stopping the next, health trimmed to declared entries, and backfill that starts a cursor on first sight, resumes a truncated page and steps back five seconds |
 | `tests/sources.spec.ts` | The Feishu and GitHub Sources on a `SourceContext`: translation, polls and read positions, the pull request rules, health |
 | `tests/commands.spec.ts` | CLI calls as the deployment's accounts, the Channels' answers, and repository-scoped GitHub calls |
 | `tests/feishu-read.spec.ts`, `tests/github-read.spec.ts` | Feishu and GitHub reads |
