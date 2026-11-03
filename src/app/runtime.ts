@@ -39,6 +39,7 @@ import { Outbox } from './outbox.ts'
 import { Passes } from './passes.ts'
 import { Setup } from './setup.ts'
 import { feishuSettings } from '../sources/feishu.ts'
+import { ImRegistry } from './im.ts'
 import { health, type Health, type SourceContext, type SourceHost } from '../sources/host.ts'
 import { Sessions } from './sessions.ts'
 import { Settings } from './settings.ts'
@@ -62,6 +63,8 @@ export class Runtime extends Service implements SourceHost {
   readonly prompts: Prompts
   readonly effects: Effects
   readonly sources: SourceRegistry
+  /** IM adapters a bridge registers, each kept alive as a Source kind with its connection, health and backfill. */
+  readonly im: ImRegistry
   readonly commands: Commands
   readonly sessions: Sessions
   readonly settings: Settings
@@ -112,6 +115,8 @@ export class Runtime extends Service implements SourceHost {
           .catch(() => { /* sync() records its failure in health. */ })
         return () => {}
       })
+      // IM adapters arrive from a bridge plugin after this, so the registry keeps its own loops and stops with the runtime.
+      this.im = new ImRegistry({ sources, context: kind => this.context(kind), lifetime: this.lifetime, logger: ctx.logger })
       const links: LinkHost = { store, links: this.sourceLinks, commands, sources, lifetime: this.lifetime }
       const link = (trigger: Trigger, signal?: AbortSignal) => sourceLink(links, trigger, signal)
       const environment = (ticket: Ticket) => this.ticketEnvironment(ticket)
@@ -237,6 +242,8 @@ export class Runtime extends Service implements SourceHost {
       await Promise.allSettled([passes, this.effects.drain(), ...agents.map(agent => agent.whenIdle())])
       // The workers' jobs and subagents stop too: their ends would start worker turns without the tool limits released below.
       await this.executor.shutdown()
+      // IM loops end with the lifetime abort above; joining them closes their sockets and unregisters their kinds before the store closes.
+      await this.im.stopAll()
       this.executor.dispose()
       this.sessions.dispose()
       for (const dispose of this.disposers.reverse()) dispose()

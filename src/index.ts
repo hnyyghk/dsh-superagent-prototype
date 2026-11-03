@@ -19,9 +19,12 @@ export async function apply(ctx: Context, config: DeploymentConfig): Promise<voi
     ctx.fiber.restart().then(() => { ctx.get('settings')?.describe() }).catch((error: unknown) => { ctx.logger.error('dsh-superagent restart failed: %s', String(error)) })
   }
   const runtime = new Runtime(ctx, machine, restart)
+  // Provided before awaiting setup, so a bridge that injects `superagentIm` registers at once instead of after a slow setup.
+  ctx.provide('superagentIm', runtime.im)
   ctx.effect(() => async () => { await runtime.stop() })
   await runtime.ready
   ctx.logger.info(runtime.configured() ? 'dsh-superagent ready; the Superagent sidebar entry opens the management panel' : `dsh-superagent is waiting for setup: ${runtime.setupProblem?.detail ?? ''}`)
 }
 export type { Deployment, DeploymentConfig } from './deployment.ts'
+export type { ImAdapter, ImCapabilities, ImChannel, ImConfig, ImEvent, ImIdentity, ImUi } from './sources/im.ts'
 export * from './core/index.ts'

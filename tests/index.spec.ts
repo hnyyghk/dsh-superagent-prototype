@@ -9,6 +9,8 @@ vi.mock('../src/app/runtime.ts', () => ({ Runtime: class {
   constructor(_ctx: unknown, readonly machine: Machine, readonly restart: () => void) { runtimes.push(this) }
   configured() { return true }
   async stop() {}
+  /** The IM registry the entry provides as `superagentIm`. */
+  im = { register: () => () => {}, stopAll: async () => {} }
 } }))
 /** Simulate the Cordis loader updating a volatile configuration reference in place. */
 const commit = (reference: unknown, value: unknown) => { (reference as Record<symbol, (value: unknown) => void>)[Symbol.for('cosmokit.volatile.write')]!(value) }
@@ -17,22 +19,26 @@ function context() {
   const handlers = new Map<string, () => void>()
   const configure = vi.fn(() => () => {})
   const describe = vi.fn(() => [])
+  const provided = new Map<string, unknown>()
   const ctx = {
     on: vi.fn((name: string, handler: () => void) => { handlers.set(name, handler) }),
     inject: vi.fn((_services: string[], callback: (child: unknown) => void) => { callback({ effect: (effect: () => unknown) => effect(), settings: { configure } }) }),
     effect: vi.fn(),
+    provide: vi.fn((name: string, value: unknown) => { provided.set(name, value); return () => {} }),
     fiber: { restart: vi.fn(async () => {}) },
     get: vi.fn((name: string) => name === 'settings' ? { describe } : undefined),
     logger: { info: vi.fn(), error: vi.fn() },
   }
-  return { ctx, handlers, configure, describe }
+  return { ctx, handlers, configure, describe, provided }
 }
 
 it('reads a limit DSH commits a new value of without a restart, and asks DSH to generate no settings page', async () => {
-  const { ctx, handlers, configure } = context()
+  const { ctx, handlers, configure, provided } = context()
   const config = Config({ stateDir: '/srv/state', promptMaxChars: 5000 })
   await apply(ctx as never, config)
   expect(configure).toHaveBeenCalledExactlyOnceWith({ auto: false }, ctx.fiber)
+  // A bridge injects the registry by this name, so it is provided before setup has a chance to be slow.
+  expect(provided.has('superagentIm')).toBe(true)
   const { machine } = runtimes.at(-1)!
   expect(machine.promptMaxChars.get()).toBe(5000)
   commit(config.promptMaxChars, 8000)

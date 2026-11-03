@@ -1,5 +1,4 @@
-import { F as Thread, U as Trigger } from "./intake-BntR4bhz.js";
-import { _ as Tally, g as SourceRegistry, n as SourceKind, r as SourceContext } from "./kind-CmU2VAka.js";
+import { _ as SourceContext, ct as Trigger, et as Thread, g as SourceKind, v as SourceRegistry, y as Tally } from "./kv-BcJ1NkkE.js";
 import { Context } from "@deepseek-ai/cordis";
 import { z } from "zod";
 //#region src/sources/feishu-read.d.ts
@@ -18,8 +17,8 @@ declare const EventSchema: z.ZodObject<{
   message_id: z.ZodString;
   chat_id: z.ZodString;
   chat_type: z.ZodEnum<{
-    p2p: "p2p";
     group: "group";
+    p2p: "p2p";
   }>;
   sender_id: z.ZodString;
   sender_type: z.ZodEnum<{

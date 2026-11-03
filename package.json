@@ -17,6 +17,10 @@
     "./github-watch": "./lib/github-watch.js",
     "./feishu-watch": "./lib/feishu-watch.js",
     "./msp-watch": "./lib/msp-watch.js",
+    "./im": {
+      "types": "./lib/im.d.ts",
+      "default": "./lib/im.js"
+    },
     "./package.json": "./package.json",
     "./locale/*.json": "./locale/*.json"
   },

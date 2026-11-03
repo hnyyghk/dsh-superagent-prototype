@@ -11,6 +11,9 @@ import { health, type SourceContext } from '../sources/host.ts'
 import { cursorAt, pause } from '../sources/poll.ts'
 import type { SourceRegistry } from '../sources/registry.ts'
 
+// A bridge plugin injects `superagentIm` and calls `register` with its adapter; nothing else of the runtime is its business.
+declare module '@deepseek-ai/cordis' { interface Context { superagentIm: ImRegistry } }
+
 /** How often the registry looks at the adapter's health and its conversations' histories, and how long it waits before reconnecting. */
 export interface ImTiming { healthMs?: number; backfillMs?: number; backoffMs?: number; maxBackoffMs?: number }
 export interface ImRegistryDeps {
