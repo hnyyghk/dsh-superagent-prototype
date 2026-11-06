@@ -56,6 +56,13 @@ describe('DWS contracts and authority', () => {
     expect(threadPage(value, 'g1', 'topic-1').next).toBe('2026-11-06 12:00:00.123')
     expect(() => threadPage(value, 'g1', 'topic-other')).toThrow('scope')
   })
+  it('reads earlier topic context instead of only replies newer than the trigger', async () => {
+    const h = host(async () => JSON.stringify({ ok: true, outcome: 'success', data: { openConversationId: 'g1', openConvThreadId: 'topic-1', replies: [row()] }, meta: { pagination: { endpoint_exhausted: true } } }))
+    const trigger = dingtalkTrigger(normalizeMessage(row('m1', { threadId: 'topic-1' }), 'g1'), config())!
+    await dingtalkRead(h.commands, trigger, 'thread', undefined, config())
+    const args = h.commands.run.mock.calls[0]![1]
+    expect(args[args.indexOf('--direction') + 1]).toBe('older')
+  })
 })
 
 describe('bounded polling', () => {

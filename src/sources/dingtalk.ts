@@ -122,7 +122,7 @@ export async function dingtalkRead(commands: Runner, trigger: Trigger, action: s
   if (action === 'thread') {
     if (!trigger.meta.topicId) return { status: 'unavailable', reason: 'This message exposes no native topic ID; read its parent/around resources instead' }
     const page = threadPage(await client.call(['chat', 'thread', 'list-replies', '--conversation-id', group,
-      '--topic-id', String(trigger.meta.topicId), '--direction', 'newer', '--time', cursor || dwsTime(Date.parse(trigger.at) - 1000), '--limit', String(config.pageSize)]), group, String(trigger.meta.topicId))
+      '--topic-id', String(trigger.meta.topicId), '--direction', 'older', '--time', cursor || dwsTime(Date.now() + 1000), '--limit', String(config.pageSize)]), group, String(trigger.meta.topicId))
     return { status: page.hasMore ? 'partial' : 'ok', messages: page.messages.map(contextMessage),
       ...(page.next ? { next_resource: `dingtalk/${trigger.id}/thread?time=${encodeURIComponent(page.next)}` } : {}) }
   }

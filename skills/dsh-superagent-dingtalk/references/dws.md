@@ -12,7 +12,7 @@ dws --profile '<corpId:userId>' chat message list --conversation-id '<openConver
   --time '<Shanghai time>' --direction newer --limit 50 --format json
 dws --profile '<corpId:userId>' chat +messages-mget --msg-ids '<actual message ID>' --no-reactions --no-threads --format json
 dws --profile '<corpId:userId>' chat thread list-replies --conversation-id '<openConversationId>' \
-  --topic-id '<openConvThreadId>' --direction newer --time '<exact returned boundary>' --format json
+  --topic-id '<openConvThreadId>' --direction older --time '<exact returned boundary>' --format json
 ```
 
 `messages` and boolean `hasMore` are required. Continue using the exact `nextPage.time`, including millisecond precision; do not derive it from message createTime or pass `--cursor`. Missing cursors, repeated boundaries, partial failures and page budgets are not end-of-history.
