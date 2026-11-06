@@ -6,6 +6,8 @@ import { readGithub } from '../sources/github-read.ts'
 import { feishuReferences, feishuRead } from '../sources/feishu-read.ts'
 import { feishuRef } from '../sources/feishu.ts'
 import { feishuTriggerId } from '../sources/feishu-trigger.ts'
+import { dingtalkRead, dingtalkReferences } from '../sources/dingtalk.ts'
+import { DingTalkConfigSchema } from '../sources/dingtalk-client.ts'
 import { ASSIGNMENTS, INPUTS, assignmentLine, decisionCard, decisionDetails, inputLine, newestPage, preview, textPage, threadCard, ticketCard,
   ticketDetails, triggerCard, type TicketThread } from './cards.ts'
 import { threadTitle } from './views/records.ts'
@@ -51,6 +53,7 @@ export const RESOURCES: readonly { name: string; holds: string; executor?: true 
   { name: 'models', holds: 'model providers, the DSH default and each role\'s model' },
   { name: 'models/<provider>', holds: 'one provider\'s models' },
   { name: 'feishu/<trigger-id>/…', holds: 'a Feishu original, as the dsh-superagent-feishu skill describes', executor: true },
+  { name: 'dingtalk/<trigger-id>/…', holds: 'a DingTalk original, parent, topic or bounded conversation context; see dsh-superagent-dingtalk', executor: true },
   { name: 'github/…', holds: 'a GitHub original, as the dsh-superagent-github skill describes', executor: true },
 ]
 export const resourceGrammar = (executor: boolean): string => RESOURCES.filter(resource => !executor || resource.executor)
@@ -104,7 +107,7 @@ const trigger = (host: ResourceHost, id: string, ticketId?: string): Trigger => 
 async function sourcePage(read: Read, source: string, fetch: () => Promise<unknown>) {
   const { host, resource, offset, sessionId } = read
   const body = offset === 0 ? JSON.stringify(await fetch()) : host.pages.get(`${sessionId}:${resource}`)
-  if (body === undefined) throw new Error(`Read this ${source === 'feishu' ? 'Feishu' : 'GitHub'} resource from offset 0 first`)
+  if (body === undefined) throw new Error(`Read this ${source} resource from offset 0 first`)
   if (offset === 0) host.pages.set(`${sessionId}:${resource}`, body)
   return text(read, body)
 }
@@ -206,6 +209,14 @@ const ROUTES: readonly Route[] = [
     const commands = read.host.commands.withSignal(read.signal)
     return sourcePage(read, 'feishu', () => feishuRead(commands, ref, read.resource, read.host.feishuPageSize()))
   }],
+  ['dingtalk/', async read => {
+    const url = new URL(read.rest, 'http://source/'), [id, action] = url.pathname.slice(1).split('/')
+    const source = trigger(read.host, id!, read.ticketId)
+    const instance = read.host.store.settings().sources.dingtalk
+    if (!instance?.enabled) throw new Error('DingTalk Source is disabled')
+    const config = DingTalkConfigSchema.parse(instance.config)
+    return sourcePage(read, 'dingtalk', () => dingtalkRead(read.host.commands.withSignal(read.signal), source, action || 'message', url.searchParams.get('time') || undefined, config))
+  }],
   ['github/', read => sourcePage(read, 'github', () => readGithub(read.host.commands.withSignal(read.signal), read.resource))],
   ['trigger/', async read => {
     const { host, rest, ticketId, offset, signal } = read
@@ -226,6 +237,7 @@ const ROUTES: readonly Route[] = [
     const around = { before: shown(neighbours.before), after: shown(neighbours.after) }
     return { ...card, ...await host.sourceLink(found, signal), acknowledgement: host.store.replyStatus(key('ack', found.id)) ?? 'not_requested',
       ...(ref ? { context: feishuReferences(ref) } : {}),
+      ...(found.source === 'dingtalk' ? { context: dingtalkReferences(found) } : {}),
       ...(offset === 0 ? {
         ...repliedTo ? { replied_to: triggerLine(repliedTo) } : {},
         around: { ...around.before ? { before: triggerLine(around.before) } : {}, ...around.after ? { after: triggerLine(around.after) } : {} },

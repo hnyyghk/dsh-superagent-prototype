@@ -1,0 +1,16 @@
+{
+  "enabled": false,
+  "config": {
+    "cli": "dws",
+    "profile": "",
+    "selfId": "",
+    "selfIds": [],
+    "groups": [],
+    "pollSeconds": 30,
+    "pageSize": 50,
+    "maxPages": 3,
+    "overlapSeconds": 30,
+    "initialLookbackSeconds": 0,
+    "allowSend": false
+  }
+}
