@@ -23,12 +23,13 @@ If no original-message URL exists, retain the Trigger and message IDs instead.
 ## DWS identity and commands
 
 Read [initialization](references/initialization.md) before first use, on a new sandbox, or after changing accounts. Initialization is idempotent: reuse an active, confirmed login; do not reinstall, stop esa-agent, or restart authorization unnecessarily.
+After login, use [group setup and testing](references/source-setup.md) to discover conversation/member IDs, configure Source and Policy, and verify a bounded round trip. A group ID alone is insufficient. Keep the source disabled while preparing configuration unless activation is requested.
 The original protocol tests used public DWS `v1.0.67`; Alibaba Group deployments must use the Group distribution, identified by `Edition: ali` / `ali dws version`, not the public npm package.
 Unlike the Feishu bot CLI, DWS normally acts as a logged-in user: this integration requires an explicitly selected public account, not the operator's personal identity.
 CloudCLI login, DWS OAuth, public AliDing entitlement and group membership are separate prerequisites.
 Use `dws auth status --readonly --format json` and `dws profile list --format json` for local identity inspection; authenticated=false with a nonempty reason is indeterminate, not proof of logout.
 Every business command must use the exact profile string returned by that CLI. The Group build can return a bare corpId; other builds can return corpId:userId. Never invent the missing user component or use clientId as a user ID. Never switch defaults, choose the first profile, import a credential archive, or silently fall back to another account.
-A corp-only selector identifies an organization, not a proven public-account sender. Verify selfId separately before receiving messages. The initializer records expectedLoginAt so a later login under the same organization requires renewed identity checks.
+A corp-only selector identifies an organization, not a proven public-account sender. Verify selfId separately before receiving messages. The initializer records expectedLoginAt for conservative metadata-change checks; token refresh can also change that field, so a mismatch is not proof of a different person.
 Read the executable path and identity from the execution-environment section (`DSH_SUPERAGENT_DINGTALK_CLI` and `DSH_SUPERAGENT_DINGTALK_PROFILE`); do not assume a different `dws` on PATH or that every child shell inherits these prompt facts as environment variables.
 Let the user complete login/identity selection and any permission grant; never print credentials or disable certificate verification.
 Group login can require both device OAuth and a second PAT approval. Wait for both, then confirm Login successful and an active profile. In the operator-verified sandbox flow, device login plus PAT succeeded even while open::/runtime_context warnings remained; these warnings alone are not proof of login failure. Follow Group guidance for supported trusted applications and CloudShell on other environments; do not generalize that result to every terminal or background caller, and never spoof application identity.
@@ -38,6 +39,7 @@ For command drift, inspect that leaf's help/schema; do not guess flags or payloa
 The native Source uses bounded polling of configured groups, with durable exact continuation times and stable message-ID deduplication.
 This is polling, not a claim that a Stream subscription is active.
 Read failures and incomplete pagination retain the cursor and appear in Source health.
+Group messages can expose sendType instead of senderType. Human-readable @names do not prove addressing: scoped list-mentions results supply message-ID evidence; unknown identities and AI markers remain non-authoritative.
 
 For attachments, images, nested forwards and documents, IDs and links are references, not the contents.
 Read the actual relevant resource using the same DWS profile and its available command schema; preserve per-item failures and completeness.

@@ -20,7 +20,7 @@ const human = (message: DingMessage) => !message.ai && ['user', 'human', 'person
 export function dingtalkTrigger(message: DingMessage, config: DingTalkConfig, parent?: Trigger): Trigger | undefined {
   const identities = [config.selfId, ...config.selfIds].filter(Boolean)
   if (identities.includes(message.sender)) return undefined
-  const addressed = identities.some(id => message.text.includes(`<@${id}>`))
+  const addressed = message.mentionedSelf === true || identities.some(id => message.text.includes(`<@${id}>`))
   const root = message.thread ? key(config.profile, message.group, 'topic', message.thread)
     : parent?.threads[0]?.id || key(config.profile, message.group, message.parent || message.id)
   return { id: dingtalkTriggerId(config.profile, message.group, message.id), source: SOURCE,
@@ -45,6 +45,7 @@ export async function pollDingtalkGroup(ctx: SourceContext, config: DingTalkConf
     seen.add(boundary)
     const page = await client.messages(group, boundary)
     if (page.next && (page.next === boundary || seen.has(page.next))) throw new DwsError('cursor_stuck', 'DWS nextPage.time did not advance')
+    await client.markMentions(group, page.messages)
     for (const message of page.messages) {
       const parent = message.parent ? ctx.triggers.get(dingtalkTriggerId(config.profile, group, message.parent)) : undefined
       const trigger = dingtalkTrigger(message, config, parent)
@@ -138,12 +139,14 @@ export function createDingtalkKind(getContext: () => SourceContext): SourceKind<
     schema: DingTalkConfigSchema, health: ['dingtalk'],
     fields: [
       { key: 'cli', type: 'text', label: { zh: 'DWS 命令路径', en: 'DWS executable' } },
-      { key: 'profile', type: 'text', label: { zh: 'profile（使用 DWS 返回的原值）', en: 'Exact selector returned by DWS' } },
-      { key: 'selfId', type: 'text', label: { zh: '本账号在消息中的 senderId', en: 'Verified self senderId' } },
-      { key: 'groups', type: 'rows', label: { zh: '接收的群', en: 'Groups' }, columns: [
+      { key: 'profile', type: 'text', label: { zh: 'profile（使用 DWS 返回的原值）', en: 'Exact selector returned by DWS' }, hint: { zh: '先运行 dws profile list；集团版可能仅返回 corpId。', en: 'Use dws profile list; Group selectors can be corpId only.' } },
+      { key: 'selfId', type: 'text', label: { zh: '本账号在消息中的 senderId', en: 'Verified self senderId' }, hint: { zh: '填写公共账号 ID，用于忽略自身消息；不是应用 clientId 或管理员 ID。', en: 'Public-account sender ID for self-message suppression; not clientId or operator ID.' } },
+      { key: 'expectedLoginAt', type: 'text', advanced: true, label: { zh: '已核对身份的登录元数据时间', en: 'Verified login metadata time' }, hint: { zh: 'profile list 的 lastLoginAt；变更后需复核账号。部分版本刷新令牌也会更新此值。', en: 'lastLoginAt from profile list; changes require identity review, including refreshes on some builds.' } },
+      { key: 'groups', type: 'rows', label: { zh: '接收的群', en: 'Groups' }, hint: { zh: '用 dws chat search --query 群名 获取 openConversationId；还需在 Policy 中配置发起人名单。', en: 'Resolve IDs with dws chat search --query; configure authorized senders in Policy too.' }, columns: [
         { key: 'id', type: 'text', label: { zh: 'openConversationId', en: 'openConversationId' } },
+        { key: 'name', type: 'text', optional: true, label: { zh: '群名', en: 'Group name' } },
         { key: 'listen', type: 'select', label: { zh: '接收方式', en: 'Listen' }, options: [{ value: 'mentions', label: { zh: '仅 @', en: 'Mentions' } }, { value: 'all', label: { zh: '全部消息', en: 'All messages' } }] }] },
-      { key: 'allowSend', type: 'switch', label: { zh: '允许原群发送回复', en: 'Allow replies in source groups' } },
+      { key: 'allowSend', type: 'switch', label: { zh: '允许原群发送回复', en: 'Allow replies in source groups' }, hint: { zh: '关闭时仍可接收/执行工作，但回复无法投递；关闭来源不会清空已排队的工作或回复。', en: 'Off blocks delivery, not task execution. Disabling the source does not clear queued work or replies.' } },
       { key: 'pollSeconds', type: 'number', min: 10, max: 3600, label: { zh: '轮询间隔（秒）', en: 'Poll interval (seconds)' } },
     ],
     scope({ meta }, config) { const group = config.groups.find(g => g.id === meta.group)

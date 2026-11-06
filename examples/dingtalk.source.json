@@ -3,6 +3,7 @@
   "config": {
     "cli": "dws",
     "profile": "",
+    "expectedLoginAt": "",
     "selfId": "",
     "selfIds": [],
     "groups": [],

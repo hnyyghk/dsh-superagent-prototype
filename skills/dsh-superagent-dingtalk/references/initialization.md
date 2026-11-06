@@ -44,6 +44,6 @@ dws auth login --device
 
 重新读取profile list及该版本支持的auth status只读状态。完整成功依据是CLI登录结果和active profile，不是doctor进程退出码，也不是runtime_context是否全绿。已有实测表明open::/callback_failed告警可以与集团登录成功并存；保留为诊断项，不能单凭它让用户重新授权。
 
-记录选中的profile、登录时间、状态和发行版，不记录凭据。记录expectedLoginAt用于检测同一corp-only profile之后被重新登录的情况。确认公共账号实际senderId及测试群后才填写selfId、群和发起者名单；初始化保持来源disabled、allowSend=false，不拉群历史、不发送测试消息。
+记录选中的profile、登录元数据时间、状态和发行版，不记录凭据。expectedLoginAt提供保守的元数据变更检查；部分版本刷新令牌也会更新lastLoginAt，不能用它单独证明换号。变化后复核公共账号再更新，不反复要求扫码。确认公共账号实际senderId及测试群后，按[群来源配置](source-setup.md)填写selfId、群和发起者名单；初始化保持来源disabled、allowSend=false，不拉群历史、不发送测试消息。
 
 在xchf-superagent部署项目中，配置助手可用 `scripts/dingtalk-sandbox.mjs --plan <plan.json> --action init-dws` 执行上述检查。脚本只返回需要用户授权/选择的状态，不自动发起或批准OAuth/PAT；已登录则复用并保存关闭状态的来源配置。

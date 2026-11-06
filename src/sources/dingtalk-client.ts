@@ -32,15 +32,32 @@ export function parseDws(text: string): Json {
   let value: Json
   try { value = object(JSON.parse(text)) } catch { throw new DwsError('invalid_json', 'DWS did not return a JSON object') }
   if (!Object.keys(value).length) throw new DwsError('invalid_json', 'DWS returned an empty/unrecognized envelope')
-  if (value.success === false || value.ok === false || value.error || ['failure', 'partial_failure'].includes(string(value.outcome))) {
-    const error = object(value.error)
-    const reason = string(error.subtype ?? error.reason) || 'product_failure'
-    throw new DwsError(reason, `DWS rejected the command (${string(error.type ?? error.category) || 'unknown category'}; ${reason})`)
+  for (const layer of envelopes(value)) {
+    if (layer.success === false || layer.ok === false || layer.error || ['failure', 'partial_failure'].includes(string(layer.outcome))) {
+      const error = object(layer.error)
+      const reason = string(error.subtype ?? error.reason) || 'product_failure'
+      throw new DwsError(reason, `DWS rejected the command (${string(error.type ?? error.category) || 'unknown category'}; ${reason})`)
+    }
   }
   return value
 }
-export const payload = (value: Json): Json => Object.keys(object(value.data)).length ? object(value.data)
-  : Object.keys(object(value.result)).length ? object(value.result) : value
+function* envelopes(value: Json): Generator<Json> {
+  for (let depth = 0; depth < 6; depth++) {
+    yield value
+    const next = Object.keys(object(value.data)).length ? object(value.data) : object(value.result)
+    if (!Object.keys(next).length) return
+    value = next
+  }
+}
+/** Keep projected message diagnostics, but unwrap Group send's data.result envelope. */
+export function payload(value: Json): Json {
+  let last = value
+  for (const layer of envelopes(value)) {
+    last = layer
+    if (['messages', 'replies', 'conversationMessagesList', 'openTaskId', 'openMessageId', 'sendStatus'].some(key => key in layer)) return layer
+  }
+  return last
+}
 
 export class DwsClient {
   constructor(readonly commands: Runner, readonly config: DingTalkConfig) {}
@@ -64,7 +81,7 @@ export class DwsClient {
       const profiles = await this.call(['profile', 'list'])
       const matches = Array.isArray(profiles.profiles) ? profiles.profiles.map(object).filter(p => p.profile === this.config.profile) : []
       if (matches.length !== 1 || matches[0]!.lastLoginAt !== this.config.expectedLoginAt) {
-        throw new DwsError('identity_changed', 'The configured login changed; recheck the public account and selfId before resuming')
+        throw new DwsError('identity_changed', 'The configured login metadata changed (possibly token refresh); recheck the public account and selfId before resuming')
       }
     }
     return result
@@ -72,6 +89,30 @@ export class DwsClient {
   async messages(group: string, time: string, direction: 'newer' | 'older' = 'newer'): Promise<MessagePage> {
     return messagePage(await this.call(['chat', 'message', 'list', '--conversation-id', group,
       '--time', time, '--direction', direction, '--limit', String(this.config.pageSize)]), group)
+  }
+  /** Group DWS expands @IDs into display names. Only its scoped @me index proves those mentions. */
+  async markMentions(group: string, messages: DingMessage[]): Promise<void> {
+    const identities = [this.config.selfId, ...this.config.selfIds].filter(Boolean)
+    const unresolved = messages.filter(m => !identities.includes(m.sender) && !identities.some(id => m.text.includes(`<@${id}>`)))
+    if (!unresolved.length) return
+    const times = unresolved.map(m => Date.parse(m.at))
+    const start = new Date(Math.min(...times) - 1000).toISOString(), end = new Date(Math.max(...times) + 1000).toISOString()
+    let cursor = '0'
+    const seen = new Set<string>(), ids = new Set<string>()
+    for (let page = 0; page < this.config.maxPages; page++) {
+      seen.add(cursor)
+      const value = await this.call(['chat', 'message', 'list-mentions', '--conversation-id', group,
+        '--start', start, '--end', end, '--limit', String(this.config.pageSize), '--cursor', cursor])
+      const result = mentionPage(value, group)
+      for (const id of result.ids) ids.add(id)
+      if (!result.hasMore) {
+        for (const message of unresolved) message.mentionedSelf = ids.has(message.id)
+        return
+      }
+      if (seen.has(result.next!)) throw new DwsError('cursor_stuck', 'DWS mention cursor repeated; message cursor retained')
+      cursor = result.next!
+    }
+    throw new DwsError('mention_page_budget', 'DWS mention lookup exceeded its page budget; message cursor retained')
   }
   async message(group: string, id: string): Promise<DingMessage> {
     const value = payload(await this.call(['chat', '+messages-mget', '--msg-ids', id, '--no-reactions', '--no-threads']))
@@ -99,7 +140,7 @@ export function messageTime(value: unknown): string {
 }
 export interface DingMessage {
   id: string; group: string; sender: string; senderName: string; senderType: string; ai: boolean; at: string; text: string
-  parent?: string; parentSender?: string; openSender?: string; thread?: string; url?: string; raw: Json
+  parent?: string; parentSender?: string; openSender?: string; thread?: string; url?: string; mentionedSelf?: boolean; raw: Json
 }
 export function normalizeMessage(value: unknown, group: string): DingMessage {
   const row = object(value), id = string(row.messageId ?? row.openMessageId), actualGroup = string(row.conversationId ?? row.openConversationId)
@@ -107,7 +148,7 @@ export function normalizeMessage(value: unknown, group: string): DingMessage {
   const sender = string(row.senderId), quote = object(row.quotedMessage)
   if (!sender) throw new DwsError('schema_drift', 'DWS did not return a stable senderId; display names cannot grant authorization')
   const text = typeof row.text === 'string' ? row.text : typeof row.content === 'string' ? row.content : ''
-  return { id, group, sender, senderName: string(row.sender) || sender, senderType: string(row.senderType).toLowerCase(),
+  return { id, group, sender, senderName: string(row.sender) || sender, senderType: string(row.senderType ?? row.sendType).toLowerCase(),
     ai: row.messageAiSendFlag !== undefined && row.messageAiSendFlag !== null
       && ![false, 0, 'false', '0'].includes(row.messageAiSendFlag as string | number | boolean), at: messageTime(row.createTime), text,
     ...(string(row.senderOpenDingTalkId) ? { openSender: string(row.senderOpenDingTalkId) } : {}),
@@ -116,6 +157,27 @@ export function normalizeMessage(value: unknown, group: string): DingMessage {
     ...(typeof row.url === 'string' && /^(https:\/\/|dingtalk:\/\/)/.test(row.url) ? { url: row.url } : {}), raw: row }
 }
 export interface MessagePage { messages: DingMessage[]; hasMore: boolean; next?: string }
+export function mentionPage(value: Json, group: string): { ids: string[]; hasMore: boolean; next?: string } {
+  const row = payload(value)
+  if (!Array.isArray(row.conversationMessagesList) || typeof row.hasMore !== 'boolean'
+    || value.partial === true || value.failedCount || object(value.paging).partial || object(value.paging).truncated) {
+    throw new DwsError('schema_drift', 'DWS mention lookup is incomplete or has no scoped conversation list')
+  }
+  const ids: string[] = []
+  for (const entry of row.conversationMessagesList) {
+    const conversation = object(entry)
+    if (conversation.openConversationId !== group || !Array.isArray(conversation.messages)) throw new DwsError('source_mismatch', 'DWS mention lookup returned another conversation')
+    for (const entry of conversation.messages) {
+      const message = object(entry), id = string(message.messageId ?? message.openMessageId)
+      const ownGroup = string(message.conversationId ?? message.openConversationId)
+      if (!id || (ownGroup && ownGroup !== group)) throw new DwsError('source_mismatch', 'DWS mention has no scoped message ID')
+      ids.push(id)
+    }
+  }
+  const next = string(row.nextCursor)
+  if (row.hasMore && (!next || !ids.length)) throw new DwsError('pagination_gap', 'DWS mention continuation is missing')
+  return { ids, hasMore: row.hasMore, ...(row.hasMore ? { next } : {}) }
+}
 export function messagePage(value: Json, group: string): MessagePage {
   const row = payload(value)
   if (!Array.isArray(row.messages) || typeof row.hasMore !== 'boolean') throw new DwsError('schema_drift', 'DWS message pagination requires messages and boolean hasMore')

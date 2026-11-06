@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
-import { DingTalkConfigSchema, DwsClient, messagePage, threadPage, normalizeMessage, parseDws, delivered } from '../src/sources/dingtalk-client.ts'
+import { DingTalkConfigSchema, DwsClient, messagePage, mentionPage, threadPage, normalizeMessage, parseDws, delivered } from '../src/sources/dingtalk-client.ts'
 import { dingtalkTrigger, dingtalkRead, pollDingtalkGroup, sendDingtalk, createDingtalkKind } from '../src/sources/dingtalk.ts'
 import type { SourceContext } from '../src/sources/host.ts'
-import type { OutboundMessage } from '../src/core/index.ts'
+import type { OutboundMessage, Trigger } from '../src/core/index.ts'
 
 const config = () => DingTalkConfigSchema.parse({ profile: 'corp:public', selfId: 'self', groups: [{ id: 'g1' }], maxPages: 2 })
 const row = (id = 'm1', extra: Record<string, unknown> = {}) => ({ messageId: id, conversationId: 'g1', senderId: 'human', senderType: 'user', sender: 'User', text: '<@self> fix this', createTime: '2026-11-06 12:00:00', ...extra })
 function host(run: (bin: string, args: string[]) => Promise<string>) {
-  const state = new Map<string, unknown>(), receive = vi.fn(async () => 'stored' as const)
+  const state = new Map<string, unknown>(), receive = vi.fn(async (_trigger: Trigger) => 'stored' as const)
   const commands = { run: vi.fn(run) }
   const ctx = { commands, state: { get: (key: string) => state.get(key), set: (key: string, value: unknown) => state.set(key, value) },
     atomic: (fn: () => unknown) => fn(), receive, triggers: { get: () => undefined } } as unknown as SourceContext
@@ -29,7 +29,7 @@ describe('DWS contracts and authority', () => {
     expect(cfg.profile).toBe('ding-corp')
     const h = host(async (_bin, args) => JSON.stringify(args.includes('auth') ? { authenticated: true }
       : { profiles: [{ profile: 'ding-corp', status: 'active', lastLoginAt: '2026-11-07T00:00:00Z' }] }))
-    await expect(new DwsClient(h.commands, cfg).identity()).rejects.toThrow('login changed')
+    await expect(new DwsClient(h.commands, cfg).identity()).rejects.toThrow('login metadata changed')
     expect(h.commands.run.mock.calls[0]![1].slice(0,2)).toEqual(['--profile','ding-corp'])
   })
   it('rejects unknown/incomplete pagination and preserves exact millisecond continuation', () => {
@@ -51,6 +51,19 @@ describe('DWS contracts and authority', () => {
     const changed = dingtalkTrigger(normalizeMessage(row(), 'g1'), { ...config(), profile: 'corp:other' })!
     expect(changed.id).not.toBe(ordinary.id); expect(changed.threads[0]!.id).not.toBe(ordinary.threads[0]!.id)
     expect(ordinary.at).toBe('2026-11-06T04:00:00.000Z')
+  })
+  it('accepts Group sendType without granting authority from display-name mentions or AI messages', () => {
+    const message = normalizeMessage(row('group-message', { senderType: undefined, sendType: 'user', text: '@公共账号(公共账号) 请检查' }), 'g1')
+    expect(dingtalkTrigger(message, config())).toMatchObject({ human: true })
+    expect(dingtalkTrigger(message, config())!.addressed).toBeUndefined()
+    expect(dingtalkTrigger({ ...message, mentionedSelf: true }, config())!.addressed).toBe('mention')
+    expect(dingtalkTrigger(normalizeMessage(row('ai', { senderType: undefined, sendType: 'user', messageAiSendFlag: 'DWS' }), 'g1'), config())!.human).toBe(false)
+    expect(dingtalkTrigger(normalizeMessage(row('bot', { senderType: 'bot', sendType: 'user' }), 'g1'), config())!.human).toBe(false)
+  })
+  it('checks nested Group product failures and retains projected completeness diagnostics', () => {
+    expect(() => parseDws(JSON.stringify({ ok: true, data: { success: false, error: { reason: 'denied' } } }))).toThrow('denied')
+    expect(() => messagePage({ messages: [row()], hasMore: false, failedCount: 1, result: { messages: [row()], hasMore: false } }, 'g1')).toThrow('incomplete')
+    expect(() => mentionPage({ result: { conversationMessagesList: [{ openConversationId: 'other', messages: [row()] }], hasMore: false } }, 'g1')).toThrow('another conversation')
   })
   it('read access cannot cross profile/group and absent native roots are not fabricated', async () => {
     const h = host(async () => { throw new Error('must not execute') }), trigger = dingtalkTrigger(normalizeMessage(row(), 'g1'), config())!
@@ -74,6 +87,27 @@ describe('DWS contracts and authority', () => {
 })
 
 describe('bounded polling', () => {
+  it('resolves Group display mentions from the scoped paginated at-me index before durable receive', async () => {
+    const h = host(async (_bin, args) => {
+      if (!args.includes('list-mentions')) return JSON.stringify({ messages: [row('m1', { senderType: undefined, sendType: 'user', text: '@公共账号 消息' }), row('m2', { text: '@公共账号 同名文本' })], hasMore: false })
+      const cursor = args[args.indexOf('--cursor') + 1]
+      return JSON.stringify({ result: { conversationMessagesList: [{ openConversationId: 'g1', messages: [{ messageId: cursor === '0' ? 'unrelated' : 'm1' }] }], hasMore: cursor === '0', nextCursor: 'page2' } })
+    })
+    await pollDingtalkGroup(h.ctx, config(), 'g1')
+    expect(h.receive.mock.calls.map(([trigger]) => trigger)).toMatchObject([{ id: expect.any(String), addressed: 'mention', human: true }, { id: expect.any(String) }])
+    expect(h.receive.mock.calls[1]![0].addressed).toBeUndefined()
+    const lookups = h.commands.run.mock.calls.filter(c => c[1].includes('list-mentions'))
+    expect(lookups).toHaveLength(2)
+    expect(lookups[0]![1]).toContain('--conversation-id')
+    expect(lookups[1]![1]).toContain('page2')
+  })
+  it('retains the message cursor when mention lookup is partial or cannot finish within budget', async () => {
+    const h = host(async (_bin, args) => JSON.stringify(args.includes('list-mentions')
+      ? { result: { conversationMessagesList: [{ openConversationId: 'g1', messages: [{ messageId: 'm1' }] }], hasMore: true, nextCursor: 'next' } }
+      : { messages: [row('m1', { text: '@公共账号 消息' })], hasMore: false }))
+    await expect(pollDingtalkGroup(h.ctx, { ...config(), maxPages: 1 }, 'g1')).rejects.toThrow('page budget')
+    expect(h.state.size).toBe(0); expect(h.receive).not.toHaveBeenCalled()
+  })
   it('awaits durable receive before saving a page and resumes using nextPage.time', async () => {
     let call = 0
     const h = host(async () => JSON.stringify(++call === 1 ? { messages: [row()], hasMore: true, nextPage: { time: '2026-11-06 12:00:00.123' } }
@@ -99,6 +133,14 @@ describe('bounded polling', () => {
 })
 
 describe('outbox receipts', () => {
+  it('extracts the Group pending data.result task and confirms only its existing delivery receipt', async () => {
+    const h = host(async (_bin, args) => JSON.stringify(args.includes('auth') ? { authenticated: true }
+      : args.includes('send') ? { ok: true, outcome: 'pending', data: { success: true, result: { openTaskId: 'group-task' } } }
+        : { success: true, result: { openMessageId: 'group-delivered', openConversationId: 'g1', sendStatus: 'SUCCESS' } }))
+    expect(await sendDingtalk(h.ctx, h.commands, { ...config(), allowSend: true }, reply())).toBe('sent')
+    expect(h.commands.run.mock.calls.filter(c => c[1].includes('send'))).toHaveLength(1)
+    expect(h.commands.run.mock.calls.at(-1)![1]).toContain('group-task')
+  })
   it('defaults to no sending and refuses image uploads or a changed profile', async () => {
     const h = host(async () => { throw new Error('must not execute') })
     await expect(sendDingtalk(h.ctx, h.commands, config(), reply())).rejects.toThrow('explicit enablement')
