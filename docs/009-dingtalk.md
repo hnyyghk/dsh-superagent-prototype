@@ -5,9 +5,9 @@
 ## 启用步骤
 
 1. 安装官方 DWS；当前适配并验证的 CLI 为1.0.67。安装器支持 `DWS_NO_SKILLS=1`，可只安装二进制，避免覆盖其他 Agent 的全局技能。
-2. 由用户使用有公共阿里钉资格的公共账号完成 DWS OAuth。CloudCLI 登录并不代表 DWS 已登录。
+2. 按skill的初始化流程安装集团版，由用户完成设备OAuth及可能出现的PAT授权。CloudCLI登录并不代表DWS已登录；已active的profile应复用，不重复扫码或重新安装。
 3. 在 profile patch 中启用 `dsh-superagent-dingtalk` 插件，再在原生设置中配置 `source:dingtalk`。初始保持 `enabled:false`、`allowSend:false`，见 `examples/dingtalk.source.json`。
-4. 根据真实 `profile list` 和消息返回填写精确 profile、selfId、群openConversationId，在Policy的钉钉来源中添加允许发起工作的senderId。不得默认选择第一个账号或按昵称授权。
+4. 根据真实 `profile list` 和消息返回填写精确profile（集团版可能只有corpId）、selfId、群openConversationId；不能拼造用户ID。初始化记录expectedLoginAt，同一组织下重登后要重新核对身份。在Policy中添加允许发起工作的senderId，不默认选择首项或按昵称授权。
 5. 用户确认目标群后开启接收；核对消息senderType、AI标志、@表示方式及权限。最后在得到明确的收件群和消息内容授权后才打开发送测试。
 
 发送者身份字段未知时不会授予人类权限；Source健康中会显示未验证数量。别名selfIds可通过配置JSON补充，用于阻止同一账号不同ID表示导致的自消息回环。

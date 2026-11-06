@@ -24,6 +24,14 @@ describe('DWS contracts and authority', () => {
     expect(() => DingTalkConfigSchema.parse({ profile: 'corp:personal,corp:public' })).toThrow()
     expect(() => parseDws('{"success":false,"error":{"category":"permission","reason":"forbidden"}}')).toThrow('forbidden')
   })
+  it('accepts the Group corp-only profile without inventing a user ID and detects a later login', async () => {
+    const cfg = DingTalkConfigSchema.parse({ profile: 'ding-corp', expectedLoginAt: '2026-11-06T07:27:56Z' })
+    expect(cfg.profile).toBe('ding-corp')
+    const h = host(async (_bin, args) => JSON.stringify(args.includes('auth') ? { authenticated: true }
+      : { profiles: [{ profile: 'ding-corp', status: 'active', lastLoginAt: '2026-11-07T00:00:00Z' }] }))
+    await expect(new DwsClient(h.commands, cfg).identity()).rejects.toThrow('login changed')
+    expect(h.commands.run.mock.calls[0]![1].slice(0,2)).toEqual(['--profile','ding-corp'])
+  })
   it('rejects unknown/incomplete pagination and preserves exact millisecond continuation', () => {
     const page = messagePage({ messages: [row()], hasMore: true, nextPage: { time: '2026-11-06 12:00:00.123' } }, 'g1')
     expect(page.next).toBe('2026-11-06 12:00:00.123')

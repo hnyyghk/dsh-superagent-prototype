@@ -3,15 +3,15 @@
 Primary references: [official repository](https://github.com/DingTalk-Real-AI/dingtalk-workspace-cli), its shipped CLI help/schema, and [DingTalk command wiki](https://open.dingtalk.com/dingtalk-dev/wiki).
 `zxy-agent/lib/dws-client/index.js` provides the original integration reference; its old `--cursor` usage is not accepted by current `chat message list`.
 
-Use one exact configured public profile for all commands below. Placeholder IDs must come from actual CLI results.
+Complete [initialization](initialization.md) first. Use the exact returned profile selector for all commands below: Group builds can return corpId alone, while other builds can return corpId:userId. Placeholder IDs must come from actual CLI results.
 
 ```sh
 dws auth status --readonly --format json
 dws profile list --format json
-dws --profile '<corpId:userId>' chat message list --conversation-id '<openConversationId>' \
+dws --profile '<returned profile>' chat message list --conversation-id '<openConversationId>' \
   --time '<Shanghai time>' --direction newer --limit 50 --format json
-dws --profile '<corpId:userId>' chat +messages-mget --msg-ids '<actual message ID>' --no-reactions --no-threads --format json
-dws --profile '<corpId:userId>' chat thread list-replies --conversation-id '<openConversationId>' \
+dws --profile '<returned profile>' chat +messages-mget --msg-ids '<actual message ID>' --no-reactions --no-threads --format json
+dws --profile '<returned profile>' chat thread list-replies --conversation-id '<openConversationId>' \
   --topic-id '<openConvThreadId>' --direction older --time '<exact returned boundary>' --format json
 ```
 
@@ -22,10 +22,10 @@ Atomic `message list` is deliberately used by the adapter for manual continuatio
 Sending contracts, for an already authorized specific message only:
 
 ```sh
-dws --profile '<corpId:userId>' chat message send --conversation-id '<openConversationId>' \
+dws --profile '<returned profile>' chat message send --conversation-id '<openConversationId>' \
   --content '<approved text>' --idempotency-key '<stable outbox key>' --yes --format json
-dws --profile '<corpId:userId>' chat message query-send-status --open-task-id '<returned openTaskId>' --format json
-dws --profile '<corpId:userId>' chat message reply --group '<openConversationId>' \
+dws --profile '<returned profile>' chat message query-send-status --open-task-id '<returned openTaskId>' --format json
+dws --profile '<returned profile>' chat message reply --group '<openConversationId>' \
   --ref-msg-id '<actual source message>' --ref-sender '<actual sender openDingTalkId>' \
   --content '<approved text>' --uuid '<stable outbox key>' --yes --format json
 ```

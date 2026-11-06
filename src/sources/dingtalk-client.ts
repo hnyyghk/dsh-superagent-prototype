@@ -5,7 +5,8 @@ import type { Commands } from '../infra/commands.ts'
 
 export const DingTalkConfigSchema = z.object({
   cli: z.string().default('dws'),
-  profile: z.string().regex(/^(?:[^\s,:]+:[^\s,:]+)?$/).default(''),
+  profile: z.string().regex(/^(?:[^\s,:]+(?::[^\s,:]+)?)?$/).default(''),
+  expectedLoginAt: z.string().default(''),
   selfId: z.string().default(''),
   selfIds: z.array(z.string().min(1)).default([]),
   groups: z.array(z.object({ id: z.string().min(1), name: z.string().optional(), listen: z.enum(['mentions', 'all']).default('mentions') }))
@@ -44,7 +45,7 @@ export const payload = (value: Json): Json => Object.keys(object(value.data)).le
 export class DwsClient {
   constructor(readonly commands: Runner, readonly config: DingTalkConfig) {}
   async call(args: string[]): Promise<Json> {
-    if (!this.config.profile) throw new DwsError('profile_required', 'Configure the exact DWS corpId:userId from profile list')
+    if (!this.config.profile) throw new DwsError('profile_required', 'Configure the exact selector returned by DWS profile list')
     try { return parseDws(await this.commands.run(this.config.cli, ['--profile', this.config.profile, ...args, '--format', 'json'])) }
     catch (error) {
       if (error instanceof DwsError || (error instanceof Error && error.name === 'AbortError')) throw error
@@ -59,6 +60,13 @@ export class DwsClient {
     const result = await this.call(['auth', 'status', '--readonly'])
     if (result.reason) throw new DwsError('identity_unreadable', 'DWS cannot determine the local authentication state; use its reported repair procedure')
     if (result.authenticated !== true) throw new DwsError('authentication_required', 'DWS is not logged in; CloudCLI login is separate from DWS OAuth')
+    if (this.config.expectedLoginAt) {
+      const profiles = await this.call(['profile', 'list'])
+      const matches = Array.isArray(profiles.profiles) ? profiles.profiles.map(object).filter(p => p.profile === this.config.profile) : []
+      if (matches.length !== 1 || matches[0]!.lastLoginAt !== this.config.expectedLoginAt) {
+        throw new DwsError('identity_changed', 'The configured login changed; recheck the public account and selfId before resuming')
+      }
+    }
     return result
   }
   async messages(group: string, time: string, direction: 'newer' | 'older' = 'newer'): Promise<MessagePage> {

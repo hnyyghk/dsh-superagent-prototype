@@ -138,7 +138,7 @@ export function createDingtalkKind(getContext: () => SourceContext): SourceKind<
     schema: DingTalkConfigSchema, health: ['dingtalk'],
     fields: [
       { key: 'cli', type: 'text', label: { zh: 'DWS 命令路径', en: 'DWS executable' } },
-      { key: 'profile', type: 'text', label: { zh: '公共账号 profile（corpId:userId）', en: 'Exact public-account profile' } },
+      { key: 'profile', type: 'text', label: { zh: 'profile（使用 DWS 返回的原值）', en: 'Exact selector returned by DWS' } },
       { key: 'selfId', type: 'text', label: { zh: '本账号在消息中的 senderId', en: 'Verified self senderId' } },
       { key: 'groups', type: 'rows', label: { zh: '接收的群', en: 'Groups' }, columns: [
         { key: 'id', type: 'text', label: { zh: 'openConversationId', en: 'openConversationId' } },
