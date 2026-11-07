@@ -24,6 +24,7 @@ def arguments():
     ap.add_argument("--group", required=True)
     ap.add_argument("--sender", required=True)
     ap.add_argument("--since", required=True, help="activation baseline, ISO-8601 with offset")
+    ap.add_argument("--ordinary", action="store_true", help="expect a fresh unaddressed human message and an inferred acceptance")
     ap.add_argument("--readback", action="store_true", help="verify existing DWS task and message IDs")
     ap.add_argument("--watch-dir", type=Path, help="private run-specific directory for status.json and events.jsonl")
     ap.add_argument("--timeout", type=int, default=3600, help="watch timeout in seconds; expiry is not success")
@@ -33,7 +34,7 @@ def arguments():
 def snapshot(args, readback):
     start = dt.datetime.fromisoformat(args.since)
     if start.tzinfo is None or not args.marker.strip():
-        ap.error("use an offset-aware baseline and a unique nonempty marker")
+        raise ValueError("use an offset-aware baseline and a unique nonempty marker")
     since = start.astimezone(dt.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
     plan = json.loads(Path(args.plan).read_text())
     base = "http://127.0.0.1:%d/orchestrator/api/" % plan["network"]["webPort"]
@@ -102,7 +103,7 @@ def snapshot(args, readback):
             if f.is_file() and not f.is_symlink() and f.stat().st_size <= 4096:
                 proof[t["id"]] = f.read_bytes().rstrip(b"\r\n") == args.marker.encode()
     echo_count = sum(db.execute("select count(*) from trigger where value->>'$.source'='dingtalk' and value->>'$.meta.group'=? and value->>'$.meta.messageId'=?", (args.group, x["messageId"])).fetchone()[0] for x in outs if x.get("messageId"))
-    result = {"at": dt.datetime.now(dt.timezone.utc).isoformat(), "marker": args.marker, "group": args.group,
+    result = {"at": dt.datetime.now(dt.timezone.utc).isoformat(), "marker": args.marker, "group": args.group, "requestMode": "ordinary" if args.ordinary else "mention",
         "enabled": instance["value"]["enabled"], "allowSend": cfg["allowSend"], "health": api("state")["health"]["dingtalk"],
         "pollStarted": (cursor or [{}])[0].get("started"), "triggers": [{"id":t["id"],"messageId":t["meta"]["messageId"],"addressed":t.get("addressed"),"human":t["human"]} for t in triggers],
         "decisions": [{k:d.get(k) for k in ("id","kind","strength","ticketId")} for d in decisions],
@@ -122,12 +123,13 @@ def classify(s, confirmed=False):
         return "CHECK_SOURCE"
     if not tr:
         return "WAITING_FOR_USER_MESSAGE"
-    if not tr[0]["human"] or tr[0]["addressed"] != "mention":
+    ordinary = s.get("requestMode") == "ordinary"
+    if not tr[0]["human"] or tr[0]["addressed"] != (None if ordinary else "mention"):
         return "CHECK_SENDER_OR_MENTION"
     if not ts or not accepts:
         return "AWAITING_TICKET"
     ticket = ts[0]
-    if accepts[0]["strength"] != "explicit" or accepts[0]["ticketId"] != ticket["id"]:
+    if accepts[0]["strength"] != ("inferred" if ordinary else "explicit") or accepts[0]["ticketId"] != ticket["id"]:
         return "CHECK_DECISION_LINK"
     if (ticket.get("ended") or {}).get("outcome")!="completed":
         return "TICKET_NOT_COMPLETED"
