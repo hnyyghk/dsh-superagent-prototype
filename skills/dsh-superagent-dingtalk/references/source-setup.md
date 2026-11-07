@@ -75,6 +75,26 @@ node scripts/dingtalk-sandbox.mjs --plan <plan.json> --action configure-source -
 4. **沿一条请求核验**：群消息 → 一条稳定Trigger → 明确请求/评估 → 工单/worker → 文件内容与报告 → 同一群Outbox回复。发送接口返回openTaskId只表示接收；query-send-status返回SUCCESS及message ID才算投递成功。
 5. **重复/忽略检查**：至少观察两个轮询周期，不重复创建工单或重复回复；旧消息、公共账号自己的回复、AI标记消息不自触发。未@及非授权成员消息按上述Policy忽略。发送超时只查已有任务，不重发。
 
+### 用户明确要求开启并跟踪时
+
+配置助手先读取当前 Source 和 Policy，按实际 groupId、profile、selfId、名单内 senderId 核对范围；同时检查全局部署 ready、执行未暂停。读取最近消息 ID、原生来源计数、工单和已有待发回复，记录带时区的基线和唯一测试码。若有旧待发消息，先厘清它们是否属于本次允许的投递范围。
+
+集团 CLI 的首次业务读取可能刷新令牌并改变 lastLoginAt。先做业务读取，再核对 profile；遇到变更时用同一 profile 的已知本人发信回执/消息 senderId、目标群的已知真实 @我 消息 ID 等证据复核身份，核对不上则停止。不要仅凭组织名更新登录时间。保留原配置快照和 revision，只在指定群、指定发起人规则不变的条件下，将原生 Source enabled 和 allowSend 同时保存为 true。回读设置后等 health 实际变为 ready 且首次轮询完成，再通知真人发消息。保存开关成功不代表已经开始轮询。
+
+让名单内操作者真实 @ 后只发送一次上面的验收请求。配置助手持续跟踪，不代发、不重排 Trigger、不为验证去重刻意重投消息。先按时间基线、群、senderId 和测试码找到原消息，再以 messageId → Trigger.id → Decision.triggerIds → Ticket.origin → Outbox.ticketId 关联；不能以全局最新工单、时间接近或相同标题代替。核对 completed、worker 报告和本工单目录里的 proof。acknowledgement 是接单提示，不能当作最终 reply，也不因两者都出现就判定重复。
+
+对已存在的发送任务只运行 query-send-status；按返回的最终 messageId 做 +messages-mget，核对 group、公共账号 senderId 和测试码。群中可读代表已投递，不代表成员已读。最终回复确认后再观察**至少两次不同的成功轮询游标推进**，核对同一输入仍只对应一个 Trigger、一次 accept、一个工单、一条含测试码的最终回复，且公共账号自己的回复没有成为新的 Trigger。只有上述证据齐全才报告闭环成功。
+
+在 Devix 沙箱中，可以使用随 skill 提供的只读观察脚本（部署助手执行，业务 worker 不操作宿主数据库）。在目标沙箱使用实际 plan 和配置，输出目录必须是本次独立私有目录：
+
+```sh
+python3 <skill>/scripts/observe.py --plan <沙箱内plan.json> \
+  --marker '<本次唯一测试码>' --group '<openConversationId>' --sender '<发起人senderId>' \
+  --since '<启用前的ISO时间，含时区>' --watch-dir '<本次运行目录>' --timeout 3600
+```
+
+不带 --watch-dir 时输出单次快照，--readback 额外核对回执。持续模式以只读 SQLite/API 追踪计数及游标，向 status.json 和 events.jsonl 写脱敏摘要。VERIFIED 才代表验收通过；等待用户、超时、源报错、文件缺失、投递待确认均按实际状态报告。用户明确要求常开时，验收完成后保留开关；若只要求配置引导则保持关闭。
+
 如果用户只要求配置引导，就完成关闭状态配置和只读验证，并把上述请求交给用户；不代替用户在群里发测试消息。需要暂停时先关闭来源；已有排队工单/Outbox分别在管理界面处理，关闭来源不会删除它们。
 
 ## 5. 常见状态
