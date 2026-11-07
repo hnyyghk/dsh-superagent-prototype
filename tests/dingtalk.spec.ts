@@ -145,10 +145,16 @@ describe('outbox receipts', () => {
   it('extracts the Group pending data.result task and confirms only its existing delivery receipt', async () => {
     const h = host(async (_bin, args) => JSON.stringify(args.includes('auth') ? { authenticated: true }
       : args.includes('send') ? { ok: true, outcome: 'pending', data: { success: true, result: { openTaskId: 'group-task' } } }
-        : { success: true, result: { openMessageId: 'group-delivered', openConversationId: 'g1', sendStatus: 'SUCCESS' } }))
+        : { success: true, openTaskId: 'group-task', messageRef: {openMessageId:'group-delivered',openConversationId:'g1'}, result: { openMessageId: 'group-delivered', openConversationId: 'g1', sendStatus: 'SUCCESS' } }))
     expect(await sendDingtalk(h.ctx, h.commands, { ...config(), allowSend: true }, reply())).toBe('sent')
     expect(h.commands.run.mock.calls.filter(c => c[1].includes('send'))).toHaveLength(1)
     expect(h.commands.run.mock.calls.at(-1)![1]).toContain('group-task')
+  })
+  it('never settles a mismatched task or an inconsistent/missing group message reference', () => {
+    const v = {openTaskId:'t1',result:{openMessageId:'m1',openConversationId:'g1',sendStatus:'SUCCESS'}}
+    expect(() => delivered(v,'g1','t2')).toThrow('another send task')
+    expect(() => delivered({...v,messageRef:{openMessageId:'other'}},'g1','t1')).toThrow('disagree')
+    expect(delivered({result:{openMessageId:'m1',sendStatus:'SUCCESS'}},'g1')).toBeUndefined()
   })
   it('defaults to no sending and refuses image uploads or a changed profile', async () => {
     const h = host(async () => { throw new Error('must not execute') })

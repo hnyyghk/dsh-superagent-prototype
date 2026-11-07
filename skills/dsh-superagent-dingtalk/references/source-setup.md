@@ -85,6 +85,8 @@ node scripts/dingtalk-sandbox.mjs --plan <plan.json> --action configure-source -
 
 对已存在的发送任务只运行 query-send-status；按返回的最终 messageId 做 +messages-mget，核对 group、公共账号 senderId 和测试码。群中可读代表已投递，不代表成员已读。最终回复确认后再观察**至少两次不同的成功轮询游标推进**，核对同一输入仍只对应一个 Trigger、一次 accept、一个工单、一条含测试码的最终回复，且公共账号自己的回复没有成为新的 Trigger。只有上述证据齐全才报告闭环成功。
 
+集团版的状态查询可同时返回顶层 openTaskId 和内层 result.sendStatus/openConversationId/openMessageId。已有任务号时，Outbox 若仍 pending，先对这份回执核对任务、原群和消息引用，不要重复发送。评估会话压缩上下文超时也可能让同一 Trigger 被自动重评；重评次数与重复收件、重复建单分别统计。
+
 在 Devix 沙箱中，可以使用随 skill 提供的只读观察脚本（部署助手执行，业务 worker 不操作宿主数据库）。在目标沙箱使用实际 plan 和配置，输出目录必须是本次独立私有目录：
 
 ```sh

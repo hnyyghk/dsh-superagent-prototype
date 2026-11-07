@@ -204,9 +204,21 @@ export function threadPage(value: Json, group: string, topic: string): MessagePa
 export const deliveryKey = (id: string): string => createHash('sha256').update('dsh-superagent-dingtalk:' + id).digest('hex')
 export interface DeliveryReceipt { digest: string; startedAt: string; taskId?: string; messageId?: string }
 /** Only explicit delivered/success plus the same conversation and a stable message ID confirms delivery. */
-export function delivered(value: Json, group: string): string | undefined {
-  const row = payload(value), id = string(row.openMessageId ?? row.messageId), conversation = string(row.openConversationId ?? row.conversationId)
-  if (conversation && conversation !== group) throw new DwsError('delivery_target_mismatch', 'DWS receipt names another conversation')
-  const status = string(row.deliveryStatus ?? row.sendStatus ?? row.status).toLowerCase()
-  return id && ['delivered', 'success'].includes(status) ? id : undefined
+export function delivered(value: Json, group: string, taskId?: string): string | undefined {
+  // Group query-send-status echoes openTaskId at the top but puts the actual delivery under result.
+  const ref = object(value.messageRef)
+  let confirmed: string | undefined
+  for (const row of envelopes(value)) {
+    if (taskId && row.openTaskId && row.openTaskId !== taskId) throw new DwsError('receipt_conflict', 'DWS receipt names another send task')
+    const id = string(row.openMessageId ?? row.messageId), conversation = string(row.openConversationId ?? row.conversationId)
+    if (conversation && conversation !== group) throw new DwsError('delivery_target_mismatch', 'DWS receipt names another conversation')
+    const status = string(row.deliveryStatus ?? row.sendStatus ?? row.status).toLowerCase()
+    if (conversation === group && id && ['delivered', 'success'].includes(status)) {
+      if ((confirmed && confirmed !== id) || (ref.openMessageId && ref.openMessageId !== id) || (ref.openConversationId && ref.openConversationId !== group)) {
+        throw new DwsError('receipt_conflict', 'DWS message references disagree with the delivered result')
+      }
+      confirmed = id
+    }
+  }
+  return confirmed
 }

@@ -97,7 +97,7 @@ export async function sendDingtalk(ctx: SourceContext, commands: Runner, config:
   }
   if (!receipt.taskId) throw new DwsError('delivery_unknown', 'DWS delivery is uncertain; inspect the conversation before manually reconciling. No resend was attempted')
   const result = await client.call(['chat', 'message', 'query-send-status', '--open-task-id', receipt.taskId])
-  const confirmed = delivered(result, address.group!)
+  const confirmed = delivered(result, address.group!, receipt.taskId)
   if (!confirmed) throw new DwsError('delivery_pending', 'DWS task exists but delivery is not confirmed; retries only query the existing task')
   ctx.state.set(id, { ...receipt, messageId: confirmed }); return 'sent'
 }
