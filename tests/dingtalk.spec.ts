@@ -87,6 +87,15 @@ describe('DWS contracts and authority', () => {
 })
 
 describe('bounded polling', () => {
+  it('records an ordinary Group message without authority when the exhausted @me result omits its list', async () => {
+    const h = host(async (_bin, args) => JSON.stringify(args.includes('list-mentions')
+      ? { success: true, errorCode: null, result: { hasMore: false, nextCursor: 'opaque' } }
+      : { messages: [row('no-at', { text: 'DWS_TEST without an actual mention', senderType: undefined, sendType: 'user' })], hasMore: false }))
+    expect((await pollDingtalkGroup(h.ctx, config(), 'g1')).complete).toBe(true)
+    expect(h.receive.mock.calls[0]![0].addressed).toBeUndefined()
+    expect(() => mentionPage({ success: true, result: { hasMore: true, nextCursor: 'opaque' } }, 'g1')).toThrow()
+    expect(() => mentionPage({ success: true, partial: true, result: { hasMore: false, nextCursor: 'opaque' } }, 'g1')).toThrow()
+  })
   it('resolves Group display mentions from the scoped paginated at-me index before durable receive', async () => {
     const h = host(async (_bin, args) => {
       if (!args.includes('list-mentions')) return JSON.stringify({ messages: [row('m1', { senderType: undefined, sendType: 'user', text: '@公共账号 消息' }), row('m2', { text: '@公共账号 同名文本' })], hasMore: false })

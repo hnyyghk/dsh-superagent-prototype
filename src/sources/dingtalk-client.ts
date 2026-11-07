@@ -159,12 +159,17 @@ export function normalizeMessage(value: unknown, group: string): DingMessage {
 export interface MessagePage { messages: DingMessage[]; hasMore: boolean; next?: string }
 export function mentionPage(value: Json, group: string): { ids: string[]; hasMore: boolean; next?: string } {
   const row = payload(value)
-  if (!Array.isArray(row.conversationMessagesList) || typeof row.hasMore !== 'boolean'
+  // Group DWS omits conversationMessagesList on a successful exhausted empty search.
+  // It still returns the product result and opaque nextCursor. This grants no mentions.
+  const exhaustedEmpty = value.success === true && row === value.result && !value.errorCode && !value.errorMsg
+    && row.hasMore === false && typeof row.nextCursor === 'string' && !('conversationMessagesList' in row)
+  const conversations = exhaustedEmpty ? [] : row.conversationMessagesList
+  if (!Array.isArray(conversations) || typeof row.hasMore !== 'boolean'
     || value.partial === true || value.failedCount || object(value.paging).partial || object(value.paging).truncated) {
     throw new DwsError('schema_drift', 'DWS mention lookup is incomplete or has no scoped conversation list')
   }
   const ids: string[] = []
-  for (const entry of row.conversationMessagesList) {
+  for (const entry of conversations) {
     const conversation = object(entry)
     if (conversation.openConversationId !== group || !Array.isArray(conversation.messages)) throw new DwsError('source_mismatch', 'DWS mention lookup returned another conversation')
     for (const entry of conversation.messages) {
