@@ -110,7 +110,7 @@ export class DwsClient {
     return m.senderId === c.selfId && (m.conversationId ?? m.openConversationId) === w.conversationId &&
       (m.openMessageId === undefined || m.openMessageId === w.messageId) &&
       (m.openConversationId === undefined || m.openConversationId === w.conversationId) &&
-      Math.abs(messageTime(m.createTime) - at) <= 2000
+      Math.abs(Date.parse(messageTime(m.createTime)) - at) <= 2000
   }
   async identity(state?: SourceContext['state']): Promise<Json> {
     const c = this.config
