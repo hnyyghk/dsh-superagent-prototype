@@ -17,6 +17,19 @@ def readback(page):
 
 
 class Readback(unittest.TestCase):
+    def test_receive_only_requires_linked_ticket_and_proof_and_forbids_send_attempts(self):
+        s = dict(triggers=[dict(human=True, addressed=None)], requestMode="ordinary",
+                 decisions=[dict(kind="accept", strength="inferred", ticketId="T")],
+                 tickets=[dict(id="T", ended=dict(outcome="completed"), assignments=[dict(report="ready")])],
+                 outbox=[dict(kind="ack", containsMarker=False, status="pending")], ownRepliesReingested=0,
+                 deliveryMode="receive-only", health=dict(state="ready"), enabled=True, allowSend=False, proofMatches={"T": True})
+        classify = observer["classify"]
+        self.assertEqual(classify(s), "OBSERVING_POLLS")
+        self.assertEqual(classify({**s, "proofMatches": {}}), "CHECK_PROOF")
+        self.assertEqual(classify({**s, "allowSend": True}), "CHECK_SOURCE")
+        self.assertEqual(classify({**s, "outbox": [{**s["outbox"][0], "startedAt": "time"}]}), "UNEXPECTED_SEND")
+        self.assertEqual(classify({**s, "deliveryMode": "reply", "allowSend": True}), "AWAITING_FINAL_REPLY")
+
     def test_flat_and_nested_terminal_receipts(self):
         self.assertTrue(confirmed({"messageId": "m", "conversationId": "g", "deliveryStatus": "delivered"}))
         self.assertTrue(confirmed({"openTaskId": "t", "messageRef": {"openMessageId": "m"},

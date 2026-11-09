@@ -25,7 +25,9 @@ def arguments():
     ap.add_argument("--sender", required=True)
     ap.add_argument("--since", required=True, help="activation baseline, ISO-8601 with offset")
     ap.add_argument("--ordinary", action="store_true", help="expect a fresh unaddressed human message and an inferred acceptance")
-    ap.add_argument("--readback", action="store_true", help="verify existing DWS task and message IDs")
+    delivery = ap.add_mutually_exclusive_group()
+    delivery.add_argument("--receive-only", action="store_true", help="verify ticket and proof with sending disabled; never query delivery")
+    delivery.add_argument("--readback", action="store_true", help="verify existing DWS task and message IDs")
     ap.add_argument("--watch-dir", type=Path, help="private run-specific directory for status.json and events.jsonl")
     ap.add_argument("--timeout", type=int, default=3600, help="watch timeout in seconds; expiry is not success")
     return ap.parse_args()
@@ -129,8 +131,8 @@ def snapshot(args, readback):
             rec = rows("select value from kv where key=?", "dingtalk:delivery:" + item["id"])
             receipt = rec[0] if rec else {}
             out = {"id": item["id"], "kind": item["kind"], "status": item["status"], "containsMarker": args.marker in item["text"],
-                   **{k: receipt[k] for k in ("taskId", "messageId") if k in receipt}}
-            if readback and receipt.get("messageId"):
+                   **{k: receipt[k] for k in ("startedAt", "taskId", "messageId") if k in receipt}}
+            if readback and not args.receive_only and receipt.get("messageId"):
                 mid = receipt["messageId"]
                 if receipt.get("taskId"):
                     task_id = receipt["taskId"]
@@ -149,7 +151,7 @@ def snapshot(args, readback):
                 proof[t["id"]] = f.read_bytes().rstrip(b"\r\n") == args.marker.encode()
     echo_count = sum(db.execute("select count(*) from trigger where value->>'$.source'='dingtalk' and value->>'$.meta.group'=? and value->>'$.meta.messageId'=?", (args.group, x["messageId"])).fetchone()[0] for x in outs if x.get("messageId"))
     result = {"at": dt.datetime.now(dt.timezone.utc).isoformat(), "marker": args.marker, "group": args.group, "requestMode": "ordinary" if args.ordinary else "mention",
-        "enabled": instance["value"]["enabled"], "allowSend": cfg["allowSend"], "health": api("state")["health"]["dingtalk"],
+        "deliveryMode": "receive-only" if args.receive_only else "reply", "enabled": instance["value"]["enabled"], "allowSend": cfg["allowSend"], "health": api("state")["health"]["dingtalk"],
         "pollStarted": (cursor or [{}])[0].get("started"), "triggers": [{"id":t["id"],"messageId":t["meta"]["messageId"],"addressed":t.get("addressed"),"human":t["human"]} for t in triggers],
         "decisions": [{k:d.get(k) for k in ("id","kind","strength","ticketId")} for d in decisions],
         "tickets": [{"id":t["id"],"ended":t.get("ended"),"assignments":[{"id":a["id"],"state":a["state"],"report":(a.get("report") or {}).get("state")} for a in t["assignments"]]} for t in tickets],
@@ -164,7 +166,10 @@ def classify(s, confirmed=False):
     replies = [o for o in outs if o["kind"] == "reply" and o["containsMarker"]]
     if len(tr)>1 or len(accepts)>1 or len(ts)>1 or len(replies)>1 or s["ownRepliesReingested"]:
         return "DUPLICATE_OR_MULTIPLE_INPUTS"
-    if s["health"]["state"] != "ready" or not (s["enabled"] and s["allowSend"]):
+    receive_only = s.get("deliveryMode") == "receive-only"
+    if receive_only and any(o.get("status") == "sent" or o.get("startedAt") or o.get("taskId") or o.get("messageId") for o in outs):
+        return "UNEXPECTED_SEND"
+    if s["health"]["state"] != "ready" or not s["enabled"] or s["allowSend"] != (not receive_only):
         return "CHECK_SOURCE"
     if not tr:
         return "WAITING_FOR_USER_MESSAGE"
@@ -182,6 +187,8 @@ def classify(s, confirmed=False):
         return "CHECK_WORKER_REPORT"
     if not s["proofMatches"].get(ticket["id"]):
         return "CHECK_PROOF"
+    if receive_only:
+        return "OBSERVING_POLLS"
     if not replies or replies[0]["status"]!="sent" or not replies[0].get("messageId"):
         return "AWAITING_FINAL_REPLY"
     if confirmed and not (replies[0].get("inGroup") and replies[0].get("markerInGroup")
@@ -205,7 +212,7 @@ def main():
         try:
             s = snapshot(args, False)
             phase = classify(s)
-            if phase == "OBSERVING_POLLS":
+            if phase == "OBSERVING_POLLS" and not args.receive_only:
                 s = snapshot(args, True)
                 phase = classify(s, True)
             if phase == "OBSERVING_POLLS" and s["pollStarted"]:
@@ -216,7 +223,8 @@ def main():
                     phase = "VERIFIED"
             else:
                 cursor, advances = None, 0
-            s.update(phase=phase, postDeliveryPollAdvances=advances)
+            s["phase"] = phase
+            s["postCompletionPollAdvances" if args.receive_only else "postDeliveryPollAdvances"] = advances
         except Exception as exc:
             s = {"phase":"OBSERVER_ERROR","errorType":type(exc).__name__, "at":dt.datetime.now(dt.timezone.utc).isoformat()}
             cursor, advances = None, 0
@@ -227,10 +235,12 @@ def main():
         tmp = folder/"status.tmp"
         tmp.write_text(json.dumps(s, ensure_ascii=False, indent=2))
         tmp.replace(folder/"status.json")
-        if s["phase"] in ("VERIFIED","TIMED_OUT","DUPLICATE_OR_MULTIPLE_INPUTS"):
-            return
+        if s["phase"] == "VERIFIED":
+            return 0
+        if s["phase"] in ("TIMED_OUT","DUPLICATE_OR_MULTIPLE_INPUTS","UNEXPECTED_SEND"):
+            return 1
         time.sleep(10)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

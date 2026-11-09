@@ -27,7 +27,7 @@ curl -fsSL https://aliding-ai-oss.oss-cn-wulanchabu.aliyuncs.com/dws/binary/late
 
 安装脚本支持DWS_INSTALL_DIR和DWS_NO_SKILLS。仅需要CLI时可安装到项目隔离目录，不覆盖其他工具的全局skills，再为当前用户PATH创建受管入口。若脚本无法从GitHub解析latest，可使用脚本定义的同一集团OSS latest归档和checksums；不可猜版本或换到公开发行渠道。
 
-外层 xchf-superagent 项目的集团部署助手会检查 ali 发行版，必要时安装集团 CLI；开源版不要调用它来初始化。已选用集团部署助手时，可用 `scripts/dingtalk-sandbox.mjs --plan <plan.json> --action init-dws` 检查集团安装和登录状态。脚本只返回需要用户授权/选择的状态，不自动发起或批准OAuth/PAT；已登录则复用并保存关闭状态的来源配置。
+仅有 Aone 分发包时直接使用上面的官方安装入口，不依赖外层项目的私有部署脚本。
 
 ## 2. 幂等判断登录状态
 
@@ -63,4 +63,4 @@ dws auth login --device
 
 重新读取profile list及该版本支持的auth status只读状态。完整成功依据是CLI登录结果和active profile，不是doctor进程退出码，也不是runtime_context是否全绿。已有实测表明open::/callback_failed告警可以与集团登录成功并存；保留为诊断项，不能单凭它让用户重新授权。
 
-记录选中的profile、登录元数据时间、状态和发行版，不记录凭据。expectedLoginAt提供保守的元数据变更检查；部分版本刷新令牌也会更新lastLoginAt，不能用它单独证明换号。变化时按[身份复核](identity.md)证明仍是原账号；成功只更新已核验时间，不覆盖人工基线，不要求重新扫码。确认公共账号实际senderId及测试群后，按[群来源配置](source-setup.md)填写selfId、群和发起者名单；初始化保持来源disabled、allowSend=false，不拉群历史、不发送测试消息。
+记录选中的profile、登录元数据时间、状态和发行版，不记录凭据。expectedLoginAt提供保守的元数据变更检查；部分版本刷新令牌也会更新lastLoginAt，不能用它单独证明换号。变化时按[身份复核](identity.md)证明仍是原账号；成功只更新已核验时间，不覆盖人工基线，不要求重新扫码。优先从 DWS 读取账号信息；能核对稳定 senderId 时不要求用户再报昵称。确认身份及目标群后，按[群来源配置](source-setup.md)填写selfId、群和发起者名单；初始化保持来源disabled、allowSend=false，不拉群历史、不发送测试消息。

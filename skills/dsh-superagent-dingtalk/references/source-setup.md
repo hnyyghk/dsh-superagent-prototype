@@ -1,120 +1,59 @@
-# DWS 群来源配置与验收（两版共用）
+# DWS 群来源配置（两种发行版共用）
 
-开源版和集团版完成登录后都从第 1 步开始。沿用现有原生 Source、Policy 和 Outbox，不创建额外监听服务。只填写群 ID 不足以运行：还需要精确 profile、公共账号自身 senderId、发起人名单，以及接收/发送开关。
+完成[安装与登录](initialization.md)后，使用这次授权的账号和群。先核对本次选择：哪一个群、哪些真人可以发起、是否需要 @、是否允许原群回复。只问尚缺的信息。不要拿聊天里的旧群、旧用户名或其他实例的 ID 作为默认值。
 
-## 1. 找到群和成员
-
-先按 [初始化](initialization.md) 确认可执行文件、发行版及当前 profile，然后使用其返回的原值：
+## 1. 用 DWS 找群、成员和当前账号
 
 ```sh
-dws --profile '<profile>' chat search --query '<群名>' --format json
-dws --profile '<profile>' chat group members --id '<openConversationId>' --format json
+dws --profile '<本次 profile>' chat search --query '<群名>' --format json
+dws --profile '<本次 profile>' chat group members --id '<openConversationId>' --format json
+dws --profile '<本次 profile>' contact user get-self --format json
 ```
 
-在返回的群列表（已验证的格式为 `result.groups`）中按成员与群主定位目标群；使用 `openConversationId`，不要填写群号、邀请链接、title 或 newCSpaceIdIM。群名可能重复，不要自动选第一项。成员分页 `hasMore=true` 时按该命令的 cursor 继续读取，不能把首屏当全群。
+从 `result.groups` 取群名和 `openConversationId`；已有确切 ID 时直接验证该群。重名时列出候选让用户选择。成员列表分页到完整为止。集团版成员行可返回 `memberNick` 和 `openDingtalkId`。只在按名单接收时才需选择具体真人；允许所有真人普通消息时不需要把群成员逐个列入名单。
 
-群成员的 `openDingtalkId` 可用于本次集团版的消息身份匹配；用一次有界消息读取核对它与实际 `senderId` 是否一致。公共账号自身 ID 填 Source 的 selfId；能发起工作的真人 ID 填 Policy 的 allowed。这两个字段不能混淆，不自动把全群成员授权为发起人。
+当前账号用稳定的 `selfId` 识别，不要求授权后口述显示名。优先用 get-self 返回的同命名空间 openDingtalkId；通讯录拒绝时，按[账号身份复核](identity.md)用有来源的、已确认送达的历史单聊回执，在本次登录者与该对端的单聊中核对发送方、会话、消息 ID 和时间。群成员列表、昵称、clientId、仅含企业 ID 的 profile 或全局消息读回都不能单独证明当前是谁。没有可靠证据时，说明还缺什么并暂停启用；不发探测消息或借用其他实例的登录凭据。
 
-`contact user get-self` 若返回企业通讯录无权限，不代表群消息权限不存在。可从已获授权发送的消息及其发送回执回读核对当前账号 senderId，并和群成员记录匹配；没有此证据时请用户确认具体公共账号，不能仅按昵称推断，也不能为了识别自己擅自发送消息。
+DWS 可以查群，不能列出正在轮询这个群的 Superagent。若本次有已知且获准访问的其他部署，可按各自 target/plan 只读检查管理 API 的 `settings`（钉钉来源 enabled、群 ID）和 `state`（来源 health）。分发包不携带其他实例的部署计划；无法访问时说明检查范围，不宣称没有其他监听者。发现同群已经启用时，先在新实例保存关闭状态，再请用户选择保留原监听、切换，或明确允许并行。并行实例各自去重，同一消息可能在每个实例各建一单；不自动停用旧实例。
 
-## 2. 有界读取和 @ 识别
+## 2. 配置并回读
 
-```sh
-dws --profile '<profile>' chat message list --conversation-id '<openConversationId>' \
-  --time '<北京时间 YYYY-MM-DD HH:mm:ss>' --direction older --limit 10 --format json
-dws --profile '<profile>' chat message list-mentions --conversation-id '<openConversationId>' \
-  --start '<ISO-8601，含+08:00>' --end '<ISO-8601，含+08:00>' --limit 50 --format json
-```
+在 Superagent 设置 → 来源 → 钉钉（DWS）填写服务用户实际可执行的 CLI 绝对路径、精确 profile、已核对的 selfId、对应 lastLoginAt 基线和目标群。先保留 enabled=false、allowSend=false，首次启用不回放历史。备份原配置，按 revision 保存并回读；保留其他来源、Policy 规则、模型及工作目录。
 
-集团版实测使用 `sendType: user`；适配器同时支持 senderType，但未知类型和 messageAiSendFlag 标记的 AI 消息不授予真人权限。集团版常将真实 @ 展示为姓名文本，因此不能用 `@昵称` 字符串匹配授权。原生适配器从限定群、限定时间范围的 `list-mentions` 中匹配稳定消息 ID，确定是否 @ 当前登录账号。
-
-两套分页不同：普通消息使用 `nextPage.time`，@我索引使用 `nextCursor`。@索引不完整、权限失败或超出页数预算时保留普通消息游标，状态页给出错误；不能忽略失败继续推进。正常路径每30秒有界轮询，不使用 Stream，也不需安装机器人或创建事件订阅。首次启用默认不回放历史消息。
-
-## 3. 在原生面板配置
-
-在 Superagent 设置中打开「来源 → 钉钉（DWS）」。如果没有该项，先确认当前 profile 已加载原型的 `dsh-superagent-dingtalk` 插件（`dsh-superagent/dingtalk-watch`）。以下是两版共用的配置：
-
-| 字段 | 填写内容 |
+| 本次授权 | 本群 Source 和 Policy |
 | --- | --- |
-| DWS 命令路径 | 服务进程可执行、使用同一登录态的绝对路径 |
-| profile | `profile list` 返回的精确 selector |
-| selfId | 已核对的公共账号 senderId，不能填写 clientId |
-| 接收的群 | `{id: openConversationId, name: 群名, listen: mentions}` |
-| 轮询间隔 | 初始建议30秒 |
-| 高级 → 登录元数据时间 | 人工核对时的 lastLoginAt 基线；变化时按[身份复核](identity.md)自动验证，不等同于换号 |
-| 允许原群发送回复 | 接收/执行与发送独立；需要原群回复时开启 |
+| 指定真人，必须 @ | listen=mentions；只将核对过的真人 senderId 加入 allowed，未 @ 和名单外请求设为 ignore。真实 @ 用该群 list-mentions 的消息 ID 核实，而非名字文本。 |
+| 群内所有真人，普通消息也可发起 | listen=all；该群 listedUnaddressed、unlistedUnaddressed 设为 inferred。如果同一批人的 @ 请求也按意图判断，unlistedAddressed 同样为 inferred。研判为 auto，并保留一条限本群、仅匹配明确可执行任务的启用规则。闲聊、账号自己的消息和 AI 消息不能作为真人授权。 |
+| 仅接收 / 同时允许原群回复 | 仅接收保持 allowSend=false；只有明确允许向该群发送时才设为 true。关闭回复不会阻止建单；以后开启前审阅待发 Outbox。 |
 
-Policy → 钉钉：添加操作者的真实 senderId。首轮只允许这位操作者，未@消息、名单外@消息、名单外普通消息均设为忽略。名单内真人明确@公共账号才形成明确请求。仅把群设为“全部消息”不会自动授予所有人工作权限。
+若用户只要准备配置，就留在关闭状态。要求启用接收时，仅在指定群、账号和范围上启用，确认运行未暂停、服务 ready、首次成功轮询游标已落盘。此时可报告「接收已启用」，还不能报告真人任务已完成。不建 Stream 订阅，不另起第二个监听器。
 
-保留既有团队提示词、模型、执行目录、业务规则与其他来源配置。Superagent总体部署必须ready，且未暂停。真实工作还依赖模型额度和任务工作目录可用；读取群消息成功不能代替模型/执行验证。
+## 3. 首次轮询成功后，单独征询一次
 
-两版均可直接在原生面板按上表配置；初次保存时让来源和允许回复都保持关闭。以下是外层 xchf-superagent 部署助手的可选快捷方式：仅在其受管 CLI 路径与本次选择一致时使用，独立原型不依赖这些脚本。
+若本次尚未决定，主动询问：「要由真人在目标群发送一条测试消息，验证能否自动建单吗？**现在测试 / 暂时跳过**」。未答复或跳过就结束 DWS 配置，不发消息、不建测试工单；已明确选择的直接走对应分支。由 devix-superagent 引导时，把结果交回主流程继续可选迁移，不再次询问同一个测试。已有配置的状态查询不会触发此邀请。
 
-```json
-{
-  "profile": "<profile>",
-  "groupId": "<openConversationId>",
-  "groupName": "<群名>",
-  "selfId": "<公共账号senderId>",
-  "allowed": [{"id": "<操作者senderId>", "name": "<操作者>"}]
-}
-```
+**只有选择测试才执行以下步骤。** 记录带时区的测试开始时间，生成一个唯一编号。按现有监听模式让授权真人发一条独立消息：仅 @ 模式从成员选择器真实 @ 公共账号；普通消息模式无需 @，不引用旧话题。不要让监听账号代发。
+
+> 请在本工单目录创建 dingtalk-proof.txt，仅写入 DWS_TEST_<本次唯一编号>，读回核对并在工单报告中记录结果。不修改仓库，不提交代码。
+
+只有该群已允许回复且此次要验证投递时，再加「完成后在本群回复该编号」。以群、senderId、编号和原消息 ID 定位 Trigger，沿 decision.triggerIds、ticket.origin 确认一次 accept、一个 completed 工单、worker 报告 ready 和本工单目录 proof；同一实例再观察两次成功游标推进，不能重发输入来验证去重。
+
+- **仅接收**：在工单和产物验收，不要求 Outbox 回执，不为测试开启发送。其他实例发的群回复不能算作本实例的结果。
+- **允许回复并验证投递**：跟踪本工单 Outbox。ack 是接单提示，只有一条含编号的最终回复；有 openTaskId 时仅查询原任务，确认成功并按 messageId 在原群读回，核对账号和编号。自己的回复不得再次建单；投递不确定时不可重发。参见 [DWS 命令](dws.md)。
+
+受管 Devix 实例可从钉钉 skill 目录运行只读观察器（独立安装可用原生面板及群回读核对相同证据）：
 
 ```sh
-node scripts/dingtalk-sandbox.mjs --plan <plan.json> --action stage
-node scripts/dingtalk-sandbox.mjs --plan <plan.json> --action configure-source --input <配置输入.json>
+python3 scripts/observe.py --plan '<本实例远端 plan.json>' --marker '<唯一编号>' \
+  --group '<openConversationId>' --sender '<测试者 senderId>' --since '<含时区 ISO 时间>' \
+  --watch-dir '<本次私有记录目录>' --timeout 3600
 ```
 
-脚本复验登录及成员、备份旧配置，按revision保存原生Source/Policy；来源enabled=false且allowSend=false。群成员身份核对不能代替“当前登录者是谁”的证据。已有不同群或发起人配置时先比较，不静默覆盖。
+普通消息加 `--ordinary`；仅接收加 `--receive-only`，两者可以同时用。默认观察名单内真人真实 @ 并核验回复。无 watch-dir 时只取快照；仅回复模式的 `--readback` 用于核对已有投递。超时、证据缺失、拒单或重复均不能称通过。安装和配置不运行故障注入、历史消息重放、换号/重启演练或基准测试。
 
-## 4. 测试顺序与通过标准
+## 常见问题
 
-1. **只读检查**：登录有效、指定群可读、selfId与发起人匹配，原生Source/Skill已注册。可以用旧测试消息重放解析和Policy判定，但不导入线上Trigger、不启动worker、不发消息。
-2. **准备真实闭环**：明确测试群、操作者和下面的测试请求。开启来源与允许回复；确认运行状态ready。关闭allowSend只阻止投递，不阻止工作，未投递Outbox可能继续排队，所以它不是纯预览模式。
-3. **真人发起**：由名单内操作者在群里从钉钉成员选择器真实@公共账号，再发送唯一测试码，例如：`连通性验收 DWS_TEST_<时间>。仅在本工单目录创建 dingtalk-proof.txt，写入该测试码并读回核对；完成后在原群回复测试码。不修改仓库，不提交代码，不调用其他外部服务。`
-4. **沿一条请求核验**：群消息 → 一条稳定Trigger → 明确请求/评估 → 工单/worker → 文件内容与报告 → 同一群Outbox回复。发送接口返回openTaskId只表示接收；用同一任务号查询，得到明确的投递成功状态及原群消息 ID 后，再回读消息核对。
-5. **重复/忽略检查**：至少观察两个轮询周期，不重复创建工单或重复回复；旧消息、公共账号自己的回复、AI标记消息不自触发。未@及非授权成员消息按上述Policy忽略。发送超时只查已有任务，不重发。
-
-### 用户明确要求开启并跟踪时
-
-配置助手先读取当前 Source 和 Policy，按实际 groupId、profile、selfId、名单内 senderId 核对范围；同时检查全局部署 ready、执行未暂停。读取最近消息 ID、原生来源计数、工单和已有待发回复，记录带时区的基线和唯一测试码。若有旧待发消息，先厘清它们是否属于本次允许的投递范围。
-
-若业务读取刷新了令牌并改变 lastLoginAt，先看[自动身份复核与恢复验收](identity.md)，不要直接把时间改成最新值。保留原配置快照和 revision，只在指定群、指定发起人规则不变的条件下，将原生 Source enabled 和 allowSend 同时保存为 true。回读设置后等 health 实际变为 ready 且首次轮询完成，再通知真人发消息。保存开关成功不代表已经开始轮询。
-
-让名单内操作者真实 @ 后只发送一次上面的验收请求。配置助手持续跟踪，不代发、不重排 Trigger、不为验证去重刻意重投消息。先按时间基线、群、senderId 和测试码找到原消息，再以 messageId → Trigger.id → Decision.triggerIds → Ticket.origin → Outbox.ticketId 关联；不能以全局最新工单、时间接近或相同标题代替。核对 completed、worker 报告和本工单目录里的 proof。acknowledgement 是接单提示，不能当作最终 reply，也不因两者都出现就判定重复。
-
-按 [DWS 命令参考](dws.md) 回读：对已存在的发送任务只运行 query-send-status；按返回的最终 messageId 做 +messages-mget，核对 group、公共账号 senderId 和测试码。群中可读代表已投递，不代表成员已读。最终回复确认后再观察**至少两次不同的成功轮询游标推进**，核对同一输入仍只对应一个 Trigger、一次 accept、一个工单、一条含测试码的最终回复，且公共账号自己的回复没有成为新的 Trigger。只有上述证据齐全才报告闭环成功。
-
-状态字段可能在顶层或 data/result 中。用同一个 openTaskId 查询，要求明确的 success/delivered 状态、原群 ID 和对应的消息 ID；外层任务号不代表成功。已有任务号时，Outbox 若仍 pending，先对这份回执核对任务、原群和消息引用，不要重复发送。评估会话压缩上下文超时也可能让同一 Trigger 被自动重评；重评次数与重复收件、重复建单分别统计。
-
-在 Devix 沙箱中，可以使用随 skill 提供的只读观察脚本（部署助手执行，业务 worker 不操作宿主数据库）。在目标沙箱使用实际 plan 和配置，输出目录必须是本次独立私有目录：
-
-```sh
-python3 <skill>/scripts/observe.py --plan <沙箱内plan.json> \
-  --marker '<本次唯一测试码>' --group '<openConversationId>' --sender '<发起人senderId>' \
-  --since '<启用前的ISO时间，含时区>' --watch-dir '<本次运行目录>' --timeout 3600
-```
-
-不带 --watch-dir 时输出单次快照，--readback 额外核对回执。持续模式以只读 SQLite/API 追踪计数及游标，向 status.json 和 events.jsonl 写脱敏摘要。VERIFIED 才代表验收通过；等待用户、超时、源报错、文件缺失、投递待确认均按实际状态报告。用户明确要求常开时，验收完成后保留开关；若只要求配置引导则保持关闭。
-
-如果用户只要求配置引导，就完成关闭状态配置和只读验证，并把上述请求交给用户；不代替用户在群里发测试消息。需要暂停时先关闭来源；已有排队工单/Outbox分别在管理界面处理，关闭来源不会删除它们。
-
-### 可选：让指定群所有真人用普通消息发起任务
-
-当操作者明确要求时，把该群的接收方式设为“全部消息”（listen=all），在原生 Policy 的该群行把 **名单内未@** 和 **名单外未@** 都设为“推断”（inferred）。不需要把全体成员加入 allowed，也不需要通配符。确认评估为 auto，并有一条适用于该群、本项目、目标清晰的真人任务请求的启用规则。普通消息均可参与判断；只有意图明确且命中规则的请求才会建单。“谢谢”等闲聊应忽略。原有显式 @ 规则和业务审批保持原样。
-
-测试时选一位不在 allowed 名单内的真人，以**独立普通群消息**发送（不@、不引用、不在已有工单话题中追问）：“请在本次工单目录创建 dingtalk-proof.txt，写入 DWS_TEST_PLAIN_<本次唯一编号> 并读回核对。完成后在本群回复该编号。”不要由监听的公共账号代发；那会被自身消息抑制。预期是一条 human=true、没有 addressed 的 Trigger，Policy 走该群 unlistedUnaddressed → inferred；若用名单内账号测试则为 listedUnaddressed。检查一次 accept、一个 completed 工单、文件内容、原群最终回复以及其后两次轮询。这里的“仅@”验收不能代替普通消息验收。用前述 scripts/observe.py 跟踪这种新工单时**额外传 --ordinary**；默认模式仍检查真实 @ 与 explicit 接单。单纯在群里聊天可作为负例：不应建工单或发送接单通知。
-
-## 5. 常见状态
-
-| 现象 | 检查 |
-| --- | --- |
-| Waiting for deployment setup | 先完成Superagent原生部署配置 |
-| Source disabled | 来源开关未开启 |
-| Configure profile/selfIds/groups | 缺少身份或群；只填群ID不够 |
-| 钉钉消息接收已暂停：无法确认原公共账号 | 核对精确 profile、selfId 和已登记的单聊凭据（消息标识，不是 Token）；只读复核通过后自动从原游标恢复，不用重发 |
-| 能读但无工单 | 检查sendType/senderType、@我查询、Policy名单、暂停状态及评估记录 |
-| 工单完成但无群回复 | 检查allowSend、Outbox状态、原群权限和发送任务回执 |
-| open:: 或 runtime_context 警告 | 结合真实认证和业务命令判断，警告本身不等于登录失败 |
-
-同组织不同账号可能都能读同一个群。组织名、群成员资格、普通群消息回读均不能单独作为原账号证明。
+- 能读群但不建单：查本群准入、真人类型和 @ 索引、auto 研判和规则、是否暂停、模型及工作目录；未知 senderType 不能赋予真人权限。
+- 身份无法确认：保留游标与原工单，按[身份复核](identity.md)处理。不要把时间基线改为最新值来跳过校验。
+- 分页或权限错误：普通消息续页使用 nextPage.time（含毫秒），@ 索引使用 nextCursor；分页不完整保留游标。命令和有界查询见 [DWS 命令](dws.md)。
+- 工单完成而群内无回复：先确认本次是否授权发送；仅接收时这是预期行为。已授权时检查 Outbox 和原发送任务，不重复发送。
