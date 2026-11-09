@@ -7,7 +7,7 @@ import { family } from '../kv.ts'
 import { sourceContext, type SourceContext } from './host.ts'
 import type { SourceKind, ContextMessage } from './kind.ts'
 import { pause } from './poll.ts'
-import { DingTalkConfigSchema, DwsClient, DwsError, dwsTime, delivered, deliveryKey, payload, string,
+import { DingTalkConfigSchema, DwsClient, DwsError, IDENTITY_PAUSED, dwsTime, delivered, deliveryKey, payload, string,
   threadPage, type DingTalkConfig, type DingMessage, type DeliveryReceipt, type Runner } from './dingtalk-client.ts'
 
 export const SOURCE = 'dingtalk'
@@ -35,7 +35,7 @@ export function dingtalkTrigger(message: DingMessage, config: DingTalkConfig, pa
       ...(message.thread ? { topicId: message.thread } : {}), ...(message.url ? { url: message.url } : {}) } }
 }
 
-export async function pollDingtalkGroup(ctx: SourceContext, config: DingTalkConfig, group: string, now = Date.now(), commands: Runner = ctx.commands): Promise<{ read: number; unknownSenders: number; complete: boolean }> {
+export async function pollDingtalkGroup(ctx: SourceContext, config: DingTalkConfig, group: string, now = Date.now(), commands: Runner = ctx.commands, verifyAfterRead?: () => Promise<unknown>): Promise<{ read: number; unknownSenders: number; complete: boolean }> {
   const id = cursors(config.profile, group), client = new DwsClient(commands, config)
   let cursor = ctx.state.get(id) ?? { since: dwsTime(now - config.initialLookbackSeconds * 1000), started: new Date(now).toISOString() }
   const seen = new Set<string>(); let read = 0, unknownSenders = 0
@@ -46,6 +46,7 @@ export async function pollDingtalkGroup(ctx: SourceContext, config: DingTalkConf
     const page = await client.messages(group, boundary)
     if (page.next && (page.next === boundary || seen.has(page.next))) throw new DwsError('cursor_stuck', 'DWS nextPage.time did not advance')
     await client.markMentions(group, page.messages)
+    await verifyAfterRead?.() // Never ingest a page or advance even an empty cursor across an unverified login.
     for (const message of page.messages) {
       const parent = message.parent ? ctx.triggers.get(dingtalkTriggerId(config.profile, group, message.parent)) : undefined
       const trigger = dingtalkTrigger(message, config, parent)
@@ -72,8 +73,8 @@ export async function sendDingtalk(ctx: SourceContext, commands: Runner, config:
   let receipt = ctx.state.get(id)
   if (receipt && receipt.digest !== hash) throw new DwsError('receipt_conflict', 'An outbox ID cannot be reused with changed content or destination')
   if (receipt?.messageId) return 'sent'
+  await client.identity(ctx.state)
   if (!receipt) {
-    await client.identity()
     const reservation = ctx.atomic(() => {
       const existing = ctx.state.get(id)
       if (existing) return { receipt: existing, ownsIntent: false }
@@ -113,6 +114,7 @@ export function dingtalkReferences(trigger: Trigger) {
 export async function dingtalkRead(commands: Runner, trigger: Trigger, action: string, cursor: string | undefined, config: DingTalkConfig): Promise<Record<string, unknown>> {
   if (trigger.source !== SOURCE || trigger.meta.profile !== config.profile || !config.groups.some(g => g.id === trigger.meta.group)) throw new DwsError('read_scope', 'The source profile/conversation is no longer enabled')
   const group = String(trigger.meta.group), client = new DwsClient(commands, config)
+  await client.identity()
   if (action === 'message' || action === 'parent') {
     const id = action === 'parent' ? string(trigger.meta.parentId) : string(trigger.meta.messageId)
     if (!id) return { status: 'unavailable', reason: 'No original parent message ID is available' }
@@ -141,7 +143,7 @@ export function createDingtalkKind(getContext: () => SourceContext): SourceKind<
       { key: 'cli', type: 'text', label: { zh: 'DWS 命令路径', en: 'DWS executable' } },
       { key: 'profile', type: 'text', label: { zh: 'profile（使用 DWS 返回的原值）', en: 'Exact selector returned by DWS' }, hint: { zh: '先运行 dws profile list；集团版可能仅返回 corpId。', en: 'Use dws profile list; Group selectors can be corpId only.' } },
       { key: 'selfId', type: 'text', label: { zh: '本账号在消息中的 senderId', en: 'Verified self senderId' }, hint: { zh: '填写公共账号 ID，用于忽略自身消息；不是应用 clientId 或管理员 ID。', en: 'Public-account sender ID for self-message suppression; not clientId or operator ID.' } },
-      { key: 'expectedLoginAt', type: 'text', advanced: true, label: { zh: '已核对身份的登录元数据时间', en: 'Verified login metadata time' }, hint: { zh: 'profile list 的 lastLoginAt；变更后需复核账号。部分版本刷新令牌也会更新此值。', en: 'lastLoginAt from profile list; changes require identity review, including refreshes on some builds.' } },
+      { key: 'expectedLoginAt', type: 'text', advanced: true, label: { zh: '已核对身份的登录元数据时间', en: 'Verified login metadata time' }, hint: { zh: 'profile list 的 lastLoginAt；首次核对时的基线。刷新后会自动核验原公共账号，无法确认时暂停，保留游标。', en: 'lastLoginAt from profile list; changes require identity review, including refreshes on some builds.' } },
       { key: 'groups', type: 'rows', label: { zh: '接收的群', en: 'Groups' }, hint: { zh: '用 dws chat search --query 群名 获取 openConversationId；还需在 Policy 中配置发起人名单。', en: 'Resolve IDs with dws chat search --query; configure authorized senders in Policy too.' }, columns: [
         { key: 'id', type: 'text', label: { zh: 'openConversationId', en: 'openConversationId' } },
         { key: 'name', type: 'text', optional: true, label: { zh: '群名', en: 'Group name' } },
@@ -182,6 +184,17 @@ export function createDingtalkKind(getContext: () => SourceContext): SourceKind<
       DSH_SUPERAGENT_DINGTALK_GROUP: trigger?.source === SOURCE ? String(trigger.meta.group) : '' }) },
   }
 }
+export async function pollDingtalkOnce(ctx: SourceContext, config: DingTalkConfig, commands: Runner) {
+  const client = new DwsClient(commands, config), verify = () => client.identity(ctx.state)
+  await verify()
+  let count = 0, unknown = 0, partial = 0
+  for (const group of config.groups) {
+    const r = await pollDingtalkGroup(ctx, config, group.id, Date.now(), commands, verify)
+    count += r.read; unknown += r.unknownSenders; partial += Number(!r.complete)
+  }
+  return { count, unknown, partial }
+}
+
 export async function runDingtalk(ctx: SourceContext, signal: AbortSignal): Promise<void> {
   while (!signal.aborted) {
     const config = ctx.config<DingTalkConfig>(SOURCE)
@@ -191,12 +204,11 @@ export async function runDingtalk(ctx: SourceContext, signal: AbortSignal): Prom
       else if (!config.profile || !(config.selfId || config.selfIds.length) || !config.groups.length) ctx.report(SOURCE, { state: 'paused', detail: 'Configure an exact DWS profile, verified selfIds, and allowed groups; no subscription or send has started' })
       else {
         const commands = ctx.commands.withSignal(signal)
-        await new DwsClient(commands, config).identity()
-        let count = 0, unknown = 0, partial = 0
-        for (const group of config.groups) { const result = await pollDingtalkGroup(ctx, config, group.id, Date.now(), commands); count += result.read; unknown += result.unknownSenders; partial += Number(!result.complete) }
+        const {count, unknown, partial} = await pollDingtalkOnce(ctx, config, commands)
         ctx.report(SOURCE, { state: 'ready', detail: `DWS polled ${count} messages; ${partial} groups have continuation; ${unknown} sender types unverified (never explicit authority)` })
       }
-    } catch (error) { if (!signal.aborted) ctx.report(SOURCE, { state: 'error', detail: error instanceof DwsError ? `${error.reason}: ${error.message}` : 'DingTalk polling failed; cursor retained' }) }
+    } catch (error) { if (!signal.aborted) ctx.report(SOURCE, error instanceof DwsError && error.reason === 'identity_unverified'
+      ? {state:'paused',detail:IDENTITY_PAUSED} : { state: 'error', detail: error instanceof DwsError ? `${error.reason}: ${error.message}` : 'DingTalk polling failed; cursor retained' }) }
     await pause((config?.pollSeconds || 30) * 1000, signal)
   }
 }

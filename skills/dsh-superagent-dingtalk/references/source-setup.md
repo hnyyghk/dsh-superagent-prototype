@@ -41,7 +41,7 @@ dws --profile '<profile>' chat message list-mentions --conversation-id '<openCon
 | selfId | 已核对的公共账号 senderId，不能填写 clientId |
 | 接收的群 | `{id: openConversationId, name: 群名, listen: mentions}` |
 | 轮询间隔 | 初始建议30秒 |
-| 高级 → 登录元数据时间 | 当前 profile 的 lastLoginAt；这是保守的变更检查，并非稳定用户 ID |
+| 高级 → 登录元数据时间 | 人工核对时的 lastLoginAt 基线；变化时按[身份复核](identity.md)自动验证，不等同于换号 |
 | 允许原群发送回复 | 接收/执行与发送独立；需要原群回复时开启 |
 
 Policy → 钉钉：添加操作者的真实 senderId。首轮只允许这位操作者，未@消息、名单外@消息、名单外普通消息均设为忽略。名单内真人明确@公共账号才形成明确请求。仅把群设为“全部消息”不会自动授予所有人工作权限。
@@ -79,7 +79,7 @@ node scripts/dingtalk-sandbox.mjs --plan <plan.json> --action configure-source -
 
 配置助手先读取当前 Source 和 Policy，按实际 groupId、profile、selfId、名单内 senderId 核对范围；同时检查全局部署 ready、执行未暂停。读取最近消息 ID、原生来源计数、工单和已有待发回复，记录带时区的基线和唯一测试码。若有旧待发消息，先厘清它们是否属于本次允许的投递范围。
 
-CLI 的首次业务读取可能刷新令牌并改变 lastLoginAt。先做业务读取，再核对 profile；遇到变更时用同一 profile 的已知本人发信回执/消息 senderId、目标群的已知真实 @我 消息 ID 等证据复核身份，核对不上则停止。不要仅凭组织名更新登录时间。保留原配置快照和 revision，只在指定群、指定发起人规则不变的条件下，将原生 Source enabled 和 allowSend 同时保存为 true。回读设置后等 health 实际变为 ready 且首次轮询完成，再通知真人发消息。保存开关成功不代表已经开始轮询。
+若业务读取刷新了令牌并改变 lastLoginAt，先看[自动身份复核与恢复验收](identity.md)，不要直接把时间改成最新值。保留原配置快照和 revision，只在指定群、指定发起人规则不变的条件下，将原生 Source enabled 和 allowSend 同时保存为 true。回读设置后等 health 实际变为 ready 且首次轮询完成，再通知真人发消息。保存开关成功不代表已经开始轮询。
 
 让名单内操作者真实 @ 后只发送一次上面的验收请求。配置助手持续跟踪，不代发、不重排 Trigger、不为验证去重刻意重投消息。先按时间基线、群、senderId 和测试码找到原消息，再以 messageId → Trigger.id → Decision.triggerIds → Ticket.origin → Outbox.ticketId 关联；不能以全局最新工单、时间接近或相同标题代替。核对 completed、worker 报告和本工单目录里的 proof。acknowledgement 是接单提示，不能当作最终 reply，也不因两者都出现就判定重复。
 
@@ -112,9 +112,9 @@ python3 <skill>/scripts/observe.py --plan <沙箱内plan.json> \
 | Waiting for deployment setup | 先完成Superagent原生部署配置 |
 | Source disabled | 来源开关未开启 |
 | Configure profile/selfIds/groups | 缺少身份或群；只填群ID不够 |
-| identity_changed | 登录元数据变化；可能是重新登录，也可能是该发行版刷新令牌。复核账号后更新expectedLoginAt，不能直接断言换号或让用户反复扫码 |
+| 钉钉消息接收已暂停：无法确认原公共账号 | 核对精确 profile、selfId 和已登记的单聊凭据（消息标识，不是 Token）；只读复核通过后自动从原游标恢复，不用重发 |
 | 能读但无工单 | 检查sendType/senderType、@我查询、Policy名单、暂停状态及评估记录 |
 | 工单完成但无群回复 | 检查allowSend、Outbox状态、原群权限和发送任务回执 |
 | open:: 或 runtime_context 警告 | 结合真实认证和业务命令判断，警告本身不等于登录失败 |
 
-若 profile 只有组织 ID 且 get-self 没有通讯录权限，不能用 profile 单独证明当前用户身份。expectedLoginAt保持保守停机检查；该版本刷新若改变此值，长时间无人值守需要重新核对。不要声称已经完成跨刷新周期的身份连续性验证。
+同组织不同账号可能都能读同一个群。组织名、群成员资格、普通群消息回读均不能单独作为原账号证明。

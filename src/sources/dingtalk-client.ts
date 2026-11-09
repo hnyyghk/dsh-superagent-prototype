@@ -1,12 +1,17 @@
 /** DWS v1.0.67 CLI contracts. OAuth stays in DWS; no credential import or implicit identity switching. */
 import { z } from 'zod'
 import { createHash } from 'node:crypto'
+import type { SourceContext } from './host.ts'
+import { family } from '../kv.ts'
 import type { Commands } from '../infra/commands.ts'
 
 export const DingTalkConfigSchema = z.object({
   cli: z.string().default('dws'),
   profile: z.string().regex(/^(?:[^\s,:]+(?::[^\s,:]+)?)?$/).default(''),
   expectedLoginAt: z.string().default(''),
+  // Enrolled by an operator from a previously verified outgoing 1:1 receipt. Never derive this from a candidate.
+  identityWitness: z.object({ peerId: z.string().min(1), conversationId: z.string().min(1), messageId: z.string().min(1),
+    sentAt: z.string().datetime({ offset: true }) }).strict().optional(),
   selfId: z.string().default(''),
   selfIds: z.array(z.string().min(1)).default([]),
   groups: z.array(z.object({ id: z.string().min(1), name: z.string().optional(), listen: z.enum(['mentions', 'all']).default('mentions') }))
@@ -59,6 +64,10 @@ export function payload(value: Json): Json {
   return last
 }
 
+export const IDENTITY_PAUSED = '钉钉消息接收已暂停：暂时无法确认当前登录的是原公共账号。请在来源设置核对账号；确认后将从原位置继续接收。'
+const verifiedLogin = family<string>('dingtalk:verified-login:')
+const unverified = () => new DwsError('identity_unverified', IDENTITY_PAUSED)
+
 export class DwsClient {
   constructor(readonly commands: Runner, readonly config: DingTalkConfig) {}
   async call(args: string[]): Promise<Json> {
@@ -73,18 +82,57 @@ export class DwsClient {
       throw new DwsError('command_failed', 'DWS command failed; inspect the private CLI diagnostics without resending messages')
     }
   }
-  async identity(): Promise<Json> {
-    const result = await this.call(['auth', 'status', '--readonly'])
-    if (result.reason) throw new DwsError('identity_unreadable', 'DWS cannot determine the local authentication state; use its reported repair procedure')
-    if (result.authenticated !== true) throw new DwsError('authentication_required', 'DWS is not logged in; CloudCLI login is separate from DWS OAuth')
-    if (this.config.expectedLoginAt) {
-      const profiles = await this.call(['profile', 'list'])
-      const matches = Array.isArray(profiles.profiles) ? profiles.profiles.map(object).filter(p => p.profile === this.config.profile) : []
-      if (matches.length !== 1 || matches[0]!.lastLoginAt !== this.config.expectedLoginAt) {
-        throw new DwsError('identity_changed', 'The configured login metadata changed (possibly token refresh); recheck the public account and selfId before resuming')
-      }
+  private async profileRow() {
+    const profiles = await this.call(['profile', 'list'])
+    const rows = Array.isArray(profiles.profiles) ? profiles.profiles.map(object).filter(p => p.profile === this.config.profile) : []
+    if (rows.length !== 1 || !rows[0]!.lastLoginAt || !Number.isFinite(Date.parse(String(rows[0]!.lastLoginAt)))) throw unverified()
+    return rows[0]!
+  }
+  private async proveSelf(): Promise<boolean> {
+    const c = this.config, w = c.identityWitness
+    if (!c.selfId) return false
+    if (!w) {
+      // Only compare a server-reported ID in the same namespace as a DWS message sender.
+      const employee = object(payload(await this.call(['contact', 'user', 'get-self'])).orgEmployeeModel)
+      return (employee.openDingtalkId ?? employee.openDingTalkId) === c.selfId
     }
-    return result
+    if ([c.selfId, ...c.selfIds].includes(w.peerId) || c.groups.some(g => g.id === w.conversationId)) return false
+    // Unlike a group lookup or mget by ID, this searches the signed-in account's own 1:1 history with that peer.
+    const at = Date.parse(w.sentAt)
+    const res = await this.call(['chat','message','list','--open-dingtalk-id',w.peerId,'--time',dwsTime(at - 2000),
+      '--direction','newer','--limit','5'])
+    const value = payload(res)
+    if ([...envelopes(res)].some(x => x.partial === true || x.truncated === true || x.failedCount || x.complete === false ||
+        (Array.isArray(x.failures) && x.failures.length)) || !Array.isArray(value.messages)) return false
+    const found = value.messages.map(object).filter(m => (m.messageId ?? m.openMessageId) === w.messageId)
+    if (found.length !== 1) return false
+    const m = found[0]!
+    return m.senderId === c.selfId && (m.conversationId ?? m.openConversationId) === w.conversationId &&
+      (m.openMessageId === undefined || m.openMessageId === w.messageId) &&
+      (m.openConversationId === undefined || m.openConversationId === w.conversationId) &&
+      Math.abs(messageTime(m.createTime) - at) <= 2000
+  }
+  async identity(state?: SourceContext['state']): Promise<Json> {
+    const c = this.config
+    try {
+      const result = await this.call(['auth', 'status', '--readonly'])
+      if (result.reason || result.authenticated !== true) throw unverified()
+      // Legacy user-qualified selectors pin a user; a bare organization selector alone never proves identity.
+      if (!c.expectedLoginAt && !c.identityWitness && c.profile.includes(':')) return result
+      const scope = createHash('sha256').update(JSON.stringify([c.cli,c.profile,c.selfId,c.selfIds,c.expectedLoginAt,c.identityWitness])).digest('hex')
+      const cacheKey = verifiedLogin(scope), row = await this.profileRow()
+      const epoch = String(row.lastLoginAt)
+      if (epoch === (state?.get(cacheKey) ?? c.expectedLoginAt)) return result
+      if (!await this.proveSelf()) throw unverified()
+      // A concurrent login/refresh during the proof must be checked anew before using or caching it.
+      const after = await this.profileRow()
+      if (after.lastLoginAt !== epoch || after.status !== 'active') throw unverified()
+      state?.set(cacheKey, epoch)
+      return result
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') throw error
+      throw unverified()
+    }
   }
   async messages(group: string, time: string, direction: 'newer' | 'older' = 'newer'): Promise<MessagePage> {
     return messagePage(await this.call(['chat', 'message', 'list', '--conversation-id', group,

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { DingTalkConfigSchema, DwsClient, messagePage, mentionPage, threadPage, normalizeMessage, parseDws, delivered } from '../src/sources/dingtalk-client.ts'
-import { dingtalkTrigger, dingtalkRead, pollDingtalkGroup, sendDingtalk, createDingtalkKind } from '../src/sources/dingtalk.ts'
+import { dingtalkTrigger, dingtalkRead, pollDingtalkGroup, pollDingtalkOnce, runDingtalk, sendDingtalk, createDingtalkKind } from '../src/sources/dingtalk.ts'
 import type { SourceContext } from '../src/sources/host.ts'
 import type { OutboundMessage, Trigger } from '../src/core/index.ts'
 
@@ -19,7 +19,7 @@ const reply = (): OutboundMessage => ({ id: 'outbox-1', text: 'Verified result',
 describe('DWS contracts and authority', () => {
   it('pins every command to one exact profile and distinguishes OAuth from unknown local state', async () => {
     const h = host(async () => JSON.stringify({ success: true, authenticated: false, reason: 'local_state_unreadable' }))
-    await expect(new DwsClient(h.commands, config()).identity()).rejects.toThrow('cannot determine')
+    await expect(new DwsClient(h.commands, config()).identity()).rejects.toThrow('暂时无法确认')
     expect(h.commands.run.mock.calls[0]![1]).toEqual(['--profile', 'corp:public', 'auth', 'status', '--readonly', '--format', 'json'])
     expect(() => DingTalkConfigSchema.parse({ profile: 'corp:personal,corp:public' })).toThrow()
     expect(() => parseDws('{"success":false,"error":{"category":"permission","reason":"forbidden"}}')).toThrow('forbidden')
@@ -29,7 +29,7 @@ describe('DWS contracts and authority', () => {
     expect(cfg.profile).toBe('ding-corp')
     const h = host(async (_bin, args) => JSON.stringify(args.includes('auth') ? { authenticated: true }
       : { profiles: [{ profile: 'ding-corp', status: 'active', lastLoginAt: '2026-11-07T00:00:00Z' }] }))
-    await expect(new DwsClient(h.commands, cfg).identity()).rejects.toThrow('login metadata changed')
+    await expect(new DwsClient(h.commands, cfg).identity()).rejects.toThrow('暂时无法确认')
     expect(h.commands.run.mock.calls[0]![1].slice(0,2)).toEqual(['--profile','ding-corp'])
   })
   it('rejects unknown/incomplete pagination and preserves exact millisecond continuation', () => {
@@ -78,11 +78,65 @@ describe('DWS contracts and authority', () => {
     expect(() => threadPage(value, 'g1', 'topic-other')).toThrow('scope')
   })
   it('reads earlier topic context instead of only replies newer than the trigger', async () => {
-    const h = host(async () => JSON.stringify({ ok: true, outcome: 'success', data: { openConversationId: 'g1', openConvThreadId: 'topic-1', replies: [row()] }, meta: { pagination: { endpoint_exhausted: true } } }))
+    const h = host(async (_bin,args) => JSON.stringify(args.includes('auth') ? {authenticated:true} : { ok: true, outcome: 'success', data: { openConversationId: 'g1', openConvThreadId: 'topic-1', replies: [row()] }, meta: { pagination: { endpoint_exhausted: true } } }))
     const trigger = dingtalkTrigger(normalizeMessage(row('m1', { threadId: 'topic-1' }), 'g1'), config())!
     await dingtalkRead(h.commands, trigger, 'thread', undefined, config())
-    const args = h.commands.run.mock.calls[0]![1]
+    const args = h.commands.run.mock.calls.at(-1)![1]
     expect(args[args.indexOf('--direction') + 1]).toBe('older')
+  })
+})
+
+describe('identity refresh and catch-up', () => {
+  const t0='2026-11-05T04:00:00Z', t1='2026-11-06T04:00:00Z'
+  const cfg={...config(),profile:'corp',expectedLoginAt:t0,identityWitness:{peerId:'peer',conversationId:'dm',messageId:'w',sentAt:t1}}
+  const proof=row('w',{senderId:'self',conversationId:'dm'})
+  function fixture() {
+    let epoch=t0, evidence: object={messages:[proof],hasMore:false}, race=false
+    const h=host(async (_bin,args) => {
+      if(args.includes('auth'))return '{"authenticated":true}'
+      if(args.includes('profile') && !args.includes('chat'))return JSON.stringify({profiles:[{profile:'corp',lastLoginAt:epoch,status:'active'}]})
+      if(args.includes('--open-dingtalk-id')) {
+        expect(args[args.indexOf('--open-dingtalk-id')+1]).toBe('peer')
+        if(race)epoch='2026-11-07T04:00:00Z'
+        return JSON.stringify(evidence)
+      }
+      return JSON.stringify({messages:[row('catchup')],hasMore:false})
+    })
+    return {...h,refresh:()=>{epoch=t1},setEvidence:(v:object)=>{evidence=v},race:()=>{race=true}}
+  }
+  it('keeps exact in-flight continuation on failed proof, reuses the verified epoch after restart and preserves stable IDs on overlap',async()=>{
+    const h=fixture(); await pollDingtalkOnce(h.ctx,cfg,h.commands)
+    const key=[...h.state.keys()].find(k=>k.startsWith('dingtalk:cursor:'))!, saved={since:'2026-11-05 12:00:00',started:t0,next:'2026-11-05 12:00:00.123'}
+    h.state.set(key,saved);h.receive.mockClear();h.commands.run.mockClear();h.refresh()
+    h.setEvidence({messages:[],hasMore:false})
+    await expect(pollDingtalkOnce(h.ctx,cfg,h.commands)).rejects.toThrow('钉钉消息接收已暂停')
+    expect(h.state.get(key)).toEqual(saved);expect(h.receive).not.toHaveBeenCalled()
+    expect(h.commands.run.mock.calls.some(([,a])=>a.includes('--conversation-id'))).toBe(false)
+    h.setEvidence({messages:[proof],hasMore:false});h.commands.run.mockClear()
+    await pollDingtalkOnce(h.ctx,cfg,h.commands);await pollDingtalkOnce(h.ctx,cfg,h.commands)
+    const args=h.commands.run.mock.calls.map(([,a])=>a)
+    expect(args.filter(a=>a.includes('--open-dingtalk-id'))).toHaveLength(1)
+    expect(args.find(a=>a.includes('--conversation-id'))).toContain(saved.next)
+    expect(h.receive.mock.calls.map(([t])=>t.id)).toEqual(Array(2).fill(h.receive.mock.calls[0]![0].id))
+  })
+  it('does not confirm on a partial page, wrong sender, another DM, wrong message, or login changing during proof',async()=>{
+    for(const evidence of [{messages:[proof],partial:true},{messages:[{...proof,senderId:'other'}]},
+      {messages:[{...proof,conversationId:'other-dm'}]},{messages:[{...proof,messageId:'other'}]}]){
+      const h=fixture();h.refresh();h.setEvidence(evidence)
+      await expect(pollDingtalkOnce(h.ctx,cfg,h.commands)).rejects.toThrow('暂时无法确认')
+      expect(h.state.size).toBe(0)
+    }
+    const h=fixture();h.refresh();h.race();await expect(pollDingtalkOnce(h.ctx,cfg,h.commands)).rejects.toThrow('暂时无法确认')
+    expect(h.state.size).toBe(0)
+  })
+  it('on unconfirmed identity shows paused in Chinese, leaves the outbox untouched and never sends',async()=>{
+    const h=fixture();h.refresh();h.setEvidence({messages:[]});const ctl=new AbortController()
+    const report=vi.fn(()=>ctl.abort())
+    await runDingtalk({...h.ctx, configured:()=>true, config:()=>cfg,commands:{...h.commands,withSignal:()=>h.commands},report} as unknown as SourceContext,ctl.signal)
+    expect(report).toHaveBeenCalledWith('dingtalk',{state:'paused',detail:expect.stringContaining('从原位置继续接收')})
+    const out=reply();out.channel.address.profile='corp'
+    await expect(sendDingtalk(h.ctx,h.commands,{...cfg,allowSend:true},out)).rejects.toThrow('暂时无法确认')
+    expect(h.state.size).toBe(0);expect(h.commands.run.mock.calls.some(([,a])=>a.includes('send')||a.includes('reply'))).toBe(false)
   })
 })
 

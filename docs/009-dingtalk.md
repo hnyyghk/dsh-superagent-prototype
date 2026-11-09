@@ -10,6 +10,8 @@
 
 发送者身份字段未知时不会授予人类权限；Source健康中会显示未验证数量。别名selfIds可通过配置JSON补充，用于阻止同一账号不同ID表示导致的自消息回环。
 
+登录时间变化时会自动核对原账号；成功时不打扰用户，不能确认时保留游标并暂停。见[身份复核与恢复验收](../skills/dsh-superagent-dingtalk/references/identity.md)。
+
 ## 监听与上下文
 
 目前实现有界轮询，默认30秒，仅扫描配置群；首次默认从当前时间开始，不拉取全部历史。每页消费完成后保存精确 `nextPage.time`，跨轮保存续页，稳定Trigger ID去重；故障不把游标推进到当前时间。DWS Stream的 `event consume` 已有官方命令，但本Source没有建立Stream订阅。

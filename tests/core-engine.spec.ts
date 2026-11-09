@@ -72,6 +72,14 @@ function accepted(h: ReturnType<typeof harness>, id = '1', thread = 't1') {
 }
 
 describe('intake', () => {
+  it('overlap replay after a ticket is accepted never schedules a second ticket or launch', () => {
+    const h = harness(), d = accepted(h, 'overlap')
+    expect(d.ticketId).toBeTruthy()
+    expect(h.engine.receive(trigger('overlap', {threads:[{source:'chat',id:'t1'}]}))).toBe('duplicate')
+    h.pump()
+    expect(h.requests).toHaveLength(1)
+    expect(h.repo.tickets.open().map(t=>t.id)).toEqual([d.ticketId])
+  })
   it('stores a trigger once and records source filtering', () => {
     const h = harness()
     expect(h.engine.receive(trigger('1'))).toBe('stored')
