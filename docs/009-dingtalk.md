@@ -4,11 +4,9 @@
 
 ## 启用步骤
 
-1. 安装官方 DWS；当前适配并验证的 CLI 为1.0.67。安装器支持 `DWS_NO_SKILLS=1`，可只安装二进制，避免覆盖其他 Agent 的全局技能。
-2. 按skill的初始化流程安装集团版，由用户完成设备OAuth及可能出现的PAT授权。CloudCLI登录并不代表DWS已登录；已active的profile应复用，不重复扫码或重新安装。
-3. 在 profile patch 中启用 `dsh-superagent-dingtalk` 插件，再在原生设置中配置 `source:dingtalk`。初始保持 `enabled:false`、`allowSend:false`，见 `examples/dingtalk.source.json`。
-4. 根据真实 `profile list` 和消息返回填写精确profile（集团版可能只有corpId）、selfId、群openConversationId；不能拼造用户ID。初始化记录expectedLoginAt，同一组织下重登后要重新核对身份。在Policy中添加允许发起工作的senderId，不默认选择首项或按昵称授权。
-5. 用户确认目标群后开启接收；核对消息senderType、AI标志、@表示方式及权限。最后在得到明确的收件群和消息内容授权后才打开发送测试。
+1. 进入 skill 的[安装与登录](../skills/dsh-superagent-dingtalk/references/initialization.md)，选择开源 npm 或集团 OSS 安装入口。两版共用登录流程：复用已确认的 active profile；需要登录时由用户完成设备 OAuth，以及 CLI 提示的 PAT 授权。
+2. 在 profile patch 中启用 `dsh-superagent-dingtalk` 插件；初次准备时保持来源和原群回复关闭，见[来源配置示例](../examples/dingtalk.source.json)。
+3. 两版均按[群来源配置与验收](../skills/dsh-superagent-dingtalk/references/source-setup.md)查找真实群与成员 ID、配置 Source/Policy，再用唯一测试码验收原群收发和两轮去重。需要普通消息触发时，按该文的普通消息模式设置并测试。
 
 发送者身份字段未知时不会授予人类权限；Source健康中会显示未验证数量。别名selfIds可通过配置JSON补充，用于阻止同一账号不同ID表示导致的自消息回环。
 
@@ -26,6 +24,6 @@ DWS通常以登录用户发送，不能将它描述成飞书bot身份。默认�
 
 ## 验证范围
 
-`tests/dingtalk.spec.ts` 使用假的命令执行器验证协议和错误分支，不向钉钉发消息。类型检查、原型相关回归和打包须另行通过；这些不代替公共账号下的真实群权限、收消息、引用/话题、附件和投递回执联调。
+`tests/dingtalk.spec.ts` 使用假的命令执行器验证协议和错误分支，不向钉钉发消息。类型检查、原型相关回归和打包须另行通过；可用 `python3 tests/test_dingtalk_observer.py` 离线校验只读观察脚本对投递回执的识别。集团版已有真实群验收记录；开源版的命令契约和离线回执验证不能替代在目标账号、目标群上执行同一套验收。
 
 官方参考：[DWS仓库](https://github.com/DingTalk-Real-AI/dingtalk-workspace-cli)、[命令Wiki](https://open.dingtalk.com/dingtalk-dev/wiki)。实际执行参数以部署版本的help/schema为准。

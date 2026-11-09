@@ -1,6 +1,6 @@
-# 集团 DWS 群来源配置与测试
+# DWS 群来源配置与验收（两版共用）
 
-用于已登录后的接入引导。沿用现有原生 Source、Policy 和 Outbox，不创建额外监听服务。只填写群 ID 不足以运行：还需要精确 profile、公共账号自身 senderId、发起人名单，以及接收/发送开关。
+开源版和集团版完成登录后都从第 1 步开始。沿用现有原生 Source、Policy 和 Outbox，不创建额外监听服务。只填写群 ID 不足以运行：还需要精确 profile、公共账号自身 senderId、发起人名单，以及接收/发送开关。
 
 ## 1. 找到群和成员
 
@@ -11,7 +11,7 @@ dws --profile '<profile>' chat search --query '<群名>' --format json
 dws --profile '<profile>' chat group members --id '<openConversationId>' --format json
 ```
 
-搜索结果在 `result.groups`；使用 `openConversationId`，不要填写群号、邀请链接、title 或 newCSpaceIdIM。群名可能重复，核对名称、成员和群主；不要自动选第一项。成员分页 `hasMore=true` 时按该命令的 cursor 继续读取，不能把首屏当全群。
+在返回的群列表（已验证的格式为 `result.groups`）中按成员与群主定位目标群；使用 `openConversationId`，不要填写群号、邀请链接、title 或 newCSpaceIdIM。群名可能重复，不要自动选第一项。成员分页 `hasMore=true` 时按该命令的 cursor 继续读取，不能把首屏当全群。
 
 群成员的 `openDingtalkId` 可用于本次集团版的消息身份匹配；用一次有界消息读取核对它与实际 `senderId` 是否一致。公共账号自身 ID 填 Source 的 selfId；能发起工作的真人 ID 填 Policy 的 allowed。这两个字段不能混淆，不自动把全群成员授权为发起人。
 
@@ -32,7 +32,7 @@ dws --profile '<profile>' chat message list-mentions --conversation-id '<openCon
 
 ## 3. 在原生面板配置
 
-来源 → 钉钉（DWS）：
+在 Superagent 设置中打开「来源 → 钉钉（DWS）」。如果没有该项，先确认当前 profile 已加载原型的 `dsh-superagent-dingtalk` 插件（`dsh-superagent/dingtalk-watch`）。以下是两版共用的配置：
 
 | 字段 | 填写内容 |
 | --- | --- |
@@ -48,7 +48,7 @@ Policy → 钉钉：添加操作者的真实 senderId。首轮只允许这位操
 
 保留既有团队提示词、模型、执行目录、业务规则与其他来源配置。Superagent总体部署必须ready，且未暂停。真实工作还依赖模型额度和任务工作目录可用；读取群消息成功不能代替模型/执行验证。
 
-在部署项目中，助手可以生成以下独立输入后运行配置脚本（只保存关闭状态）：
+两版均可直接在原生面板按上表配置；初次保存时让来源和允许回复都保持关闭。以下是外层 xchf-superagent 部署助手的可选快捷方式：仅在其受管 CLI 路径与本次选择一致时使用，独立原型不依赖这些脚本。
 
 ```json
 {
@@ -72,20 +72,20 @@ node scripts/dingtalk-sandbox.mjs --plan <plan.json> --action configure-source -
 1. **只读检查**：登录有效、指定群可读、selfId与发起人匹配，原生Source/Skill已注册。可以用旧测试消息重放解析和Policy判定，但不导入线上Trigger、不启动worker、不发消息。
 2. **准备真实闭环**：明确测试群、操作者和下面的测试请求。开启来源与允许回复；确认运行状态ready。关闭allowSend只阻止投递，不阻止工作，未投递Outbox可能继续排队，所以它不是纯预览模式。
 3. **真人发起**：由名单内操作者在群里从钉钉成员选择器真实@公共账号，再发送唯一测试码，例如：`连通性验收 DWS_TEST_<时间>。仅在本工单目录创建 dingtalk-proof.txt，写入该测试码并读回核对；完成后在原群回复测试码。不修改仓库，不提交代码，不调用其他外部服务。`
-4. **沿一条请求核验**：群消息 → 一条稳定Trigger → 明确请求/评估 → 工单/worker → 文件内容与报告 → 同一群Outbox回复。发送接口返回openTaskId只表示接收；query-send-status返回SUCCESS及message ID才算投递成功。
+4. **沿一条请求核验**：群消息 → 一条稳定Trigger → 明确请求/评估 → 工单/worker → 文件内容与报告 → 同一群Outbox回复。发送接口返回openTaskId只表示接收；用同一任务号查询，得到明确的投递成功状态及原群消息 ID 后，再回读消息核对。
 5. **重复/忽略检查**：至少观察两个轮询周期，不重复创建工单或重复回复；旧消息、公共账号自己的回复、AI标记消息不自触发。未@及非授权成员消息按上述Policy忽略。发送超时只查已有任务，不重发。
 
 ### 用户明确要求开启并跟踪时
 
 配置助手先读取当前 Source 和 Policy，按实际 groupId、profile、selfId、名单内 senderId 核对范围；同时检查全局部署 ready、执行未暂停。读取最近消息 ID、原生来源计数、工单和已有待发回复，记录带时区的基线和唯一测试码。若有旧待发消息，先厘清它们是否属于本次允许的投递范围。
 
-集团 CLI 的首次业务读取可能刷新令牌并改变 lastLoginAt。先做业务读取，再核对 profile；遇到变更时用同一 profile 的已知本人发信回执/消息 senderId、目标群的已知真实 @我 消息 ID 等证据复核身份，核对不上则停止。不要仅凭组织名更新登录时间。保留原配置快照和 revision，只在指定群、指定发起人规则不变的条件下，将原生 Source enabled 和 allowSend 同时保存为 true。回读设置后等 health 实际变为 ready 且首次轮询完成，再通知真人发消息。保存开关成功不代表已经开始轮询。
+CLI 的首次业务读取可能刷新令牌并改变 lastLoginAt。先做业务读取，再核对 profile；遇到变更时用同一 profile 的已知本人发信回执/消息 senderId、目标群的已知真实 @我 消息 ID 等证据复核身份，核对不上则停止。不要仅凭组织名更新登录时间。保留原配置快照和 revision，只在指定群、指定发起人规则不变的条件下，将原生 Source enabled 和 allowSend 同时保存为 true。回读设置后等 health 实际变为 ready 且首次轮询完成，再通知真人发消息。保存开关成功不代表已经开始轮询。
 
 让名单内操作者真实 @ 后只发送一次上面的验收请求。配置助手持续跟踪，不代发、不重排 Trigger、不为验证去重刻意重投消息。先按时间基线、群、senderId 和测试码找到原消息，再以 messageId → Trigger.id → Decision.triggerIds → Ticket.origin → Outbox.ticketId 关联；不能以全局最新工单、时间接近或相同标题代替。核对 completed、worker 报告和本工单目录里的 proof。acknowledgement 是接单提示，不能当作最终 reply，也不因两者都出现就判定重复。
 
-对已存在的发送任务只运行 query-send-status；按返回的最终 messageId 做 +messages-mget，核对 group、公共账号 senderId 和测试码。群中可读代表已投递，不代表成员已读。最终回复确认后再观察**至少两次不同的成功轮询游标推进**，核对同一输入仍只对应一个 Trigger、一次 accept、一个工单、一条含测试码的最终回复，且公共账号自己的回复没有成为新的 Trigger。只有上述证据齐全才报告闭环成功。
+按 [DWS 命令参考](dws.md) 回读：对已存在的发送任务只运行 query-send-status；按返回的最终 messageId 做 +messages-mget，核对 group、公共账号 senderId 和测试码。群中可读代表已投递，不代表成员已读。最终回复确认后再观察**至少两次不同的成功轮询游标推进**，核对同一输入仍只对应一个 Trigger、一次 accept、一个工单、一条含测试码的最终回复，且公共账号自己的回复没有成为新的 Trigger。只有上述证据齐全才报告闭环成功。
 
-集团版的状态查询可同时返回顶层 openTaskId 和内层 result.sendStatus/openConversationId/openMessageId。已有任务号时，Outbox 若仍 pending，先对这份回执核对任务、原群和消息引用，不要重复发送。评估会话压缩上下文超时也可能让同一 Trigger 被自动重评；重评次数与重复收件、重复建单分别统计。
+状态字段可能在顶层或 data/result 中。用同一个 openTaskId 查询，要求明确的 success/delivered 状态、原群 ID 和对应的消息 ID；外层任务号不代表成功。已有任务号时，Outbox 若仍 pending，先对这份回执核对任务、原群和消息引用，不要重复发送。评估会话压缩上下文超时也可能让同一 Trigger 被自动重评；重评次数与重复收件、重复建单分别统计。
 
 在 Devix 沙箱中，可以使用随 skill 提供的只读观察脚本（部署助手执行，业务 worker 不操作宿主数据库）。在目标沙箱使用实际 plan 和配置，输出目录必须是本次独立私有目录：
 
@@ -117,4 +117,4 @@ python3 <skill>/scripts/observe.py --plan <沙箱内plan.json> \
 | 工单完成但无群回复 | 检查allowSend、Outbox状态、原群权限和发送任务回执 |
 | open:: 或 runtime_context 警告 | 结合真实认证和业务命令判断，警告本身不等于登录失败 |
 
-目前corp-only profile不提供稳定用户选择器，且本次账号的get-self无通讯录权限。expectedLoginAt保持保守停机检查；该版本刷新若改变此值，长时间无人值守需要重新核对。不要声称已经完成跨刷新周期的身份连续性验证。
+若 profile 只有组织 ID 且 get-self 没有通讯录权限，不能用 profile 单独证明当前用户身份。expectedLoginAt保持保守停机检查；该版本刷新若改变此值，长时间无人值守需要重新核对。不要声称已经完成跨刷新周期的身份连续性验证。

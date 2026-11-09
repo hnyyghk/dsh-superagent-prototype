@@ -38,12 +38,6 @@ DWS also exposes `event consume` and `event +listen-im`. Their help/schema are i
 
 An empty profile list or unauthenticated local snapshot means DWS OAuth is still required; it does not prove a public-AliDing entitlement denial. CloudCLI's public-account session is not DWS OAuth. Record the live account diagnostic in the deployment report, not in this reusable skill.
 
-After the user switches to an entitled public account and completes DWS login:
-
-1. Read profile list and confirm the exact intended public profile; do not reuse a former account's profile or import its token bundle.
-2. Verify its own stable message sender ID and any published aliases, and select one test group by its actual openConversationId.
-3. Configure the native Source with that profile/selfId/group, an explicit sender allowlist, and allowSend=false; inspect one bounded read and actual senderType/mention fields before enabling polling.
-4. Confirm partial-page continuation, own-message suppression and native Trigger context with a user-authored test request.
-5. Only after the user authorizes a concrete recipient/content test, enable allowSend and verify exactly one message, its task receipt, reconnect and restart behavior. Then inspect attachments/topics separately.
+After confirming the intended account, follow the shared [group setup and acceptance guide](source-setup.md) for ID discovery, Source/Policy configuration, original-group readback and deduplication. Neither edition needs a second listener or a second send path.
 
 If enterprise capability or membership is denied, retain that error category and request the corresponding permission; repeated login, guessed profile IDs and changing TLS settings are not fixes.

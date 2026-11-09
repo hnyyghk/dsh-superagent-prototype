@@ -31,6 +31,56 @@ def arguments():
     return ap.parse_args()
 
 
+def response_layers(reply):
+    """Validate the DWS envelope before trusting any inner receipt or message."""
+    layers = []
+    while isinstance(reply, dict) and reply:
+        if (len(layers) >= 6 or reply.get("success") is False or reply.get("ok") is False
+                or reply.get("error") or reply.get("outcome") in ("failure", "partial_failure")
+                or reply.get("complete") is False or reply.get("messagesComplete") is False):
+            raise ValueError("Incomplete or rejected DWS readback")
+        layers.append(reply)
+        data = reply.get("data")
+        reply = data if isinstance(data, dict) and data else reply.get("result")
+    if not layers:
+        raise ValueError("Empty DWS readback")
+    return layers
+
+
+def task_confirmed(layers, task_id, group, mid):
+    # The echoed task ID can be outside the layer carrying the terminal status.
+    confirmed = False
+    for row in layers:
+        ref = row.get("messageRef") or {}
+        if not isinstance(ref, dict) or row.get("openTaskId", task_id) != task_id:
+            return False
+        for obj in (row, ref):
+            if any(obj[k] != expected for k, expected in (
+                ("openConversationId", group), ("conversationId", group),
+                ("openMessageId", mid), ("messageId", mid)) if k in obj):
+                return False
+        status = str(row.get("deliveryStatus") or row.get("sendStatus") or row.get("status") or "").lower()
+        if status in ("success", "delivered"):
+            confirmed |= (row.get("openConversationId", row.get("conversationId")) == group
+                          and row.get("openMessageId", row.get("messageId")) == mid)
+        elif status in ("pending", "accepted", "failed", "failure"):
+            return False
+    return confirmed
+
+
+def group_readback(layers, mid, group, sender, marker):
+    messages = next((row["messages"] for row in layers if "messages" in row), None)
+    if not isinstance(messages, list):
+        raise ValueError("DWS message readback has no messages array")
+    found = [m for m in messages if m.get("messageId", m.get("openMessageId")) == mid]
+    if len(found) != 1:
+        return False, False
+    m = found[0]
+    in_group = m.get("conversationId", m.get("openConversationId")) == group and m.get("senderId") == sender
+    body = m.get("text", m.get("content"))
+    return in_group, in_group and isinstance(body, str) and marker in body
+
+
 def snapshot(args, readback):
     start = dt.datetime.fromisoformat(args.since)
     if start.tzinfo is None or not args.marker.strip():
@@ -60,10 +110,7 @@ def snapshot(args, readback):
                            capture_output=True, text=True, timeout=55)
         if p.returncode:
             raise ValueError("DWS receipt read failed; no send/retry attempted")
-        result = json.loads(p.stdout)
-        if result.get("success") is False or result.get("ok") is False or result.get("error"):
-            raise ValueError("DWS receipt read returned a product error")
-        return result
+        return response_layers(json.loads(p.stdout))
 
     triggers = rows("""select value from trigger where at>=? and value->>'$.source'='dingtalk'
         and value->>'$.meta.group'=? and value->>'$.actor.id'=? and instr(value->>'$.text',?)>0""",
@@ -86,13 +133,11 @@ def snapshot(args, readback):
             if readback and receipt.get("messageId"):
                 mid = receipt["messageId"]
                 if receipt.get("taskId"):
-                    confirmed = dws("chat","message","query-send-status","--open-task-id",receipt["taskId"])["result"]
-                    out["taskConfirmed"] = (confirmed.get("sendStatus") == "SUCCESS" and confirmed.get("openConversationId") == args.group
-                                            and confirmed.get("openMessageId") == mid)
-                messages = dws("chat","+messages-mget","--msg-ids",mid,"--no-reactions","--no-threads").get("messages", [])
-                matched = [m for m in messages if m.get("messageId") == mid and m.get("conversationId") == args.group and m.get("senderId") == cfg["selfId"]]
-                out["inGroup"] = len(matched) == 1
-                out["markerInGroup"] = any(args.marker in m.get("text","") for m in matched)
+                    task_id = receipt["taskId"]
+                    layers = dws("chat", "message", "query-send-status", "--open-task-id", task_id)
+                    out["taskConfirmed"] = task_confirmed(layers, task_id, args.group, mid)
+                layers = dws("chat", "+messages-mget", "--msg-ids", mid, "--no-reactions", "--no-threads")
+                out["inGroup"], out["markerInGroup"] = group_readback(layers, mid, args.group, cfg["selfId"], args.marker)
             outs.append(out)
     cursor = rows("select value from kv where key=?", "dingtalk:cursor:" + digest([cfg["profile"], args.group]))
     proof = {}
