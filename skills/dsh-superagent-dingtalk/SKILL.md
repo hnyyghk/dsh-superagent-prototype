@@ -3,6 +3,10 @@ name: dsh-superagent-dingtalk
 description: Set up and verify a DingTalk group source with open-source or Alibaba Group DWS. Read messages, threads and resource references through the configured account and deliver authorized replies through the Superagent outbox.
 ---
 
+## 原型源码随包交付
+
+Aone 发布包的 `assets/prototype-source.zip` 是本修改版仓库指定 Git 提交的完整源码快照，含原生钉钉 Source、其他来源、构建锁、文档与测试；`assets/prototype-source.json` 记录提交、文件数及 SHA-256。仅排除 Git 历史和未跟踪内容（包括依赖、机器配置和凭据）；发布时生成的归档不会递归包含自身。安装这个 skill 只下载说明和源码，不会启动 Superagent、登录 DWS 或收发消息。`devix-superagent` 的新部署从 Aone 安装本包的固定版本，校验源码后构建。
+
 A worker receives the original Trigger. Read `trigger/<id>` with `orchestrator_read` when its text is cut or ambiguous.
 Its context references point to `dingtalk/<trigger-id>/message`, `/parent` when a quoted parent ID exists, `/thread` when DWS publishes a native topic ID, and `/around` for bounded conversation history.
 For requests such as “fix the above”, read the source, quoted parent/forwarded messages and relevant surrounding context before implementing.

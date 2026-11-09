@@ -9,3 +9,6 @@ node_modules/
 *.log
 .artifacts/
 wsl-*.sh
+# Generated from a committed tree by the Aone release packager, never archive the archive.
+/skills/dsh-superagent-dingtalk/assets/prototype-source.zip
+/skills/dsh-superagent-dingtalk/assets/prototype-source.json
