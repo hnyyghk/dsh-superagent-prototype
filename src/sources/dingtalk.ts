@@ -8,7 +8,7 @@ import { sourceContext, type SourceContext } from './host.ts'
 import type { SourceKind, ContextMessage } from './kind.ts'
 import { pause } from './poll.ts'
 import { DingTalkConfigSchema, DwsClient, DwsError, IDENTITY_PAUSED, dwsTime, delivered, deliveryKey, payload, string,
-  threadPage, type DingTalkConfig, type DingMessage, type DeliveryReceipt, type Runner } from './dingtalk-client.ts'
+  threadPage, type DingTalkConfig, type DingMessage, type DeliveryReceipt, type IdentityMemo, type Runner } from './dingtalk-client.ts'
 
 export const SOURCE = 'dingtalk'
 interface Cursor { since: string; started: string; next?: string }
@@ -111,10 +111,10 @@ export function dingtalkReferences(trigger: Trigger) {
     ...(trigger.meta.parentId ? { parent: `dingtalk/${trigger.id}/parent` } : {}),
     ...(trigger.meta.topicId ? { thread: `dingtalk/${trigger.id}/thread` } : {}) }
 }
-export async function dingtalkRead(commands: Runner, trigger: Trigger, action: string, cursor: string | undefined, config: DingTalkConfig): Promise<Record<string, unknown>> {
+export async function dingtalkRead(commands: Runner, trigger: Trigger, action: string, cursor: string | undefined, config: DingTalkConfig, memo?: IdentityMemo): Promise<Record<string, unknown>> {
   if (trigger.source !== SOURCE || trigger.meta.profile !== config.profile || !config.groups.some(g => g.id === trigger.meta.group)) throw new DwsError('read_scope', 'The source profile/conversation is no longer enabled')
   const group = String(trigger.meta.group), client = new DwsClient(commands, config)
-  await client.identity()
+  await client.identity(memo)
   if (action === 'message' || action === 'parent') {
     const id = action === 'parent' ? string(trigger.meta.parentId) : string(trigger.meta.messageId)
     if (!id) return { status: 'unavailable', reason: 'No original parent message ID is available' }
@@ -163,7 +163,7 @@ export function createDingtalkKind(getContext: () => SourceContext): SourceKind<
     threadContext: { messageId: trigger => String(trigger.meta.messageId), async read(commands, trigger, part, cursor, config) {
       if (part === 'root') return { messages: [], status: 'unavailable', body: { reason: 'DWS did not expose an original root message ID; read the message/parent resource' } }
       if (!getContext().config<DingTalkConfig>(SOURCE)) throw new DwsError('source_disabled', 'DingTalk source is disabled')
-      const result = await dingtalkRead(commands, trigger, part === 'parent' ? 'parent' : trigger.meta.topicId ? 'thread' : 'around', cursor, config)
+      const result = await dingtalkRead(commands, trigger, part === 'parent' ? 'parent' : trigger.meta.topicId ? 'thread' : 'around', cursor, config, getContext().state)
       return { messages: (result.messages || (result.message ? [result.message] : [])) as ContextMessage[], body: result,
         ...(typeof result.next_resource === 'string' ? { next: new URL(result.next_resource, 'http://local').searchParams.get('time') || undefined } : {}) }
     } },

@@ -215,7 +215,7 @@ const ROUTES: readonly Route[] = [
     const instance = read.host.store.settings().sources.dingtalk
     if (!instance?.enabled) throw new Error('DingTalk Source is disabled')
     const config = DingTalkConfigSchema.parse(instance.config)
-    return sourcePage(read, 'dingtalk', () => dingtalkRead(read.host.commands.withSignal(read.signal), source, action || 'message', url.searchParams.get('time') || undefined, config))
+    return sourcePage(read, 'dingtalk', () => dingtalkRead(read.host.commands.withSignal(read.signal), source, action || 'message', url.searchParams.get('time') || undefined, config, { get: key => read.host.store.get(key) }))
   }],
   ['github/', read => sourcePage(read, 'github', () => readGithub(read.host.commands.withSignal(read.signal), read.resource))],
   ['trigger/', async read => {

@@ -4,11 +4,13 @@ import { dingtalkTrigger, dingtalkRead, pollDingtalkGroup, pollDingtalkOnce, run
 import type { SourceContext } from '../src/sources/host.ts'
 import type { OutboundMessage, Trigger } from '../src/core/index.ts'
 
-const config = () => DingTalkConfigSchema.parse({ profile: 'corp:public', selfId: 'self', groups: [{ id: 'g1' }], maxPages: 2 })
+const config = () => DingTalkConfigSchema.parse({ expectedLoginAt:'2026-11-05T04:00:00Z', profile: 'corp:public', selfId: 'self', groups: [{ id: 'g1' }], maxPages: 2 })
 const row = (id = 'm1', extra: Record<string, unknown> = {}) => ({ messageId: id, conversationId: 'g1', senderId: 'human', senderType: 'user', sender: 'User', text: '<@self> fix this', createTime: '2026-11-06 12:00:00', ...extra })
 function host(run: (bin: string, args: string[]) => Promise<string>) {
   const state = new Map<string, unknown>(), receive = vi.fn(async (_trigger: Trigger) => 'stored' as const)
-  const commands = { run: vi.fn(run) }
+  const commands = { run: vi.fn((bin:string,args:string[]) => args.includes('profile') && args[1]==='corp:public'
+    ? Promise.resolve(JSON.stringify({profiles:[{profile:'corp:public',status:'active',lastLoginAt:'2026-11-05T04:00:00Z'}]}))
+    : run(bin,args)) }
   const ctx = { commands, state: { get: (key: string) => state.get(key), set: (key: string, value: unknown) => state.set(key, value) },
     atomic: (fn: () => unknown) => fn(), receive, triggers: { get: () => undefined } } as unknown as SourceContext
   return { ctx, commands, state, receive }
@@ -128,6 +130,24 @@ describe('identity refresh and catch-up', () => {
     }
     const h=fixture();h.refresh();h.race();await expect(pollDingtalkOnce(h.ctx,cfg,h.commands)).rejects.toThrow('暂时无法确认')
     expect(h.state.size).toBe(0)
+  })
+  it('does not infer a person from a selector, including when the operator timestamp is absent',async()=>{
+    const c={...config(),expectedLoginAt:''}
+    const h=host(async(_,a)=>JSON.stringify(a.includes('auth')?{authenticated:true}:{orgEmployeeModel:{userId:'self'}}))
+    await expect(new DwsClient(h.commands,c).identity(h.ctx.state)).rejects.toThrow('暂时无法确认')
+    const ok=host(async(_,a)=>JSON.stringify(a.includes('auth')?{authenticated:true}:{result:{orgEmployeeModel:{openDingtalkId:'self'}}}))
+    await expect(new DwsClient(ok.commands,c).identity(ok.ctx.state)).resolves.toMatchObject({authenticated:true})
+  })
+  it('does not commit a page if the login changes while fetching it',async()=>{
+    let epoch=t0
+    const h=host(async(_,a)=>{
+      if(a.includes('auth'))return '{"authenticated":true}'
+      if(a.includes('profile'))return JSON.stringify({profiles:[{profile:'corp',lastLoginAt:epoch,status:'active'}]})
+      if(a.includes('--open-dingtalk-id'))return '{"messages":[],"hasMore":false}'
+      epoch=t1;return JSON.stringify({messages:[row()],hasMore:false})
+    })
+    await expect(pollDingtalkOnce(h.ctx,cfg,h.commands)).rejects.toThrow('暂停')
+    expect(h.state.size).toBe(0);expect(h.receive).not.toHaveBeenCalled()
   })
   it('on unconfirmed identity shows paused in Chinese, leaves the outbox untouched and never sends',async()=>{
     const h=fixture();h.refresh();h.setEvidence({messages:[]});const ctl=new AbortController()

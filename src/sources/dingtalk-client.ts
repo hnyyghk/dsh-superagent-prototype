@@ -65,6 +65,7 @@ export function payload(value: Json): Json {
 }
 
 export const IDENTITY_PAUSED = '钉钉消息接收已暂停：暂时无法确认当前登录的是原公共账号。请在来源设置核对账号；确认后将从原位置继续接收。'
+export type IdentityMemo = Pick<SourceContext['state'],'get'> & Partial<Pick<SourceContext['state'],'set'>>
 const verifiedLogin = family<string>('dingtalk:verified-login:')
 const unverified = () => new DwsError('identity_unverified', IDENTITY_PAUSED)
 
@@ -112,22 +113,21 @@ export class DwsClient {
       (m.openConversationId === undefined || m.openConversationId === w.conversationId) &&
       Math.abs(Date.parse(messageTime(m.createTime)) - at) <= 2000
   }
-  async identity(state?: SourceContext['state']): Promise<Json> {
+  async identity(state?: IdentityMemo): Promise<Json> {
     const c = this.config
     try {
       const result = await this.call(['auth', 'status', '--readonly'])
       if (result.reason || result.authenticated !== true) throw unverified()
-      // Legacy user-qualified selectors pin a user; a bare organization selector alone never proves identity.
-      if (!c.expectedLoginAt && !c.identityWitness && c.profile.includes(':')) return result
       const scope = createHash('sha256').update(JSON.stringify([c.cli,c.profile,c.selfId,c.selfIds,c.expectedLoginAt,c.identityWitness])).digest('hex')
       const cacheKey = verifiedLogin(scope), row = await this.profileRow()
       const epoch = String(row.lastLoginAt)
+      if (row.corpId && result.corp_id && row.corpId !== result.corp_id) throw unverified()
       if (epoch === (state?.get(cacheKey) ?? c.expectedLoginAt)) return result
       if (!await this.proveSelf()) throw unverified()
       // A concurrent login/refresh during the proof must be checked anew before using or caching it.
       const after = await this.profileRow()
       if (after.lastLoginAt !== epoch || after.status !== 'active') throw unverified()
-      state?.set(cacheKey, epoch)
+      state?.set?.(cacheKey, epoch)
       return result
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') throw error
