@@ -19,6 +19,7 @@ export const dingtalkTriggerId = (profile: string, group: string, id: string) =>
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const human = (message: DingMessage) => !message.ai && ['user', 'human', 'person', 'employee'].includes(message.senderType)
 const groupAllowed = (c: DingTalkConfig, id: unknown) => typeof id === 'string' && !!id && (c.groupScope === 'all' || c.groups.some(g => g.id === id))
+const receivesDirect = (c: DingTalkConfig) => c.directScope === 'all' || c.directPeers.length > 0
 const peerAllowed = (c: DingTalkConfig, id: unknown) => typeof id === 'string' && !!id && (c.directScope === 'all' || (c.directScope === 'selected' && c.directPeers.some(p => p.id === id)))
 function channelAllowed(a: Record<string, string>, c: DingTalkConfig) {
   if (a.profile !== c.profile || a.cli !== c.cli || !a.group) return false
@@ -171,9 +172,9 @@ export function createDingtalkKind(getContext: () => SourceContext): SourceKind<
           { value: 'all', label: { zh: '全部消息', en: 'All messages' } }, { value: 'mentions', label: { zh: '仅 @', en: 'Mentions only' } }] },
       { key: 'allowSend', type: 'switch', label: { zh: '允许原群发送回复', en: 'Allow replies in source groups' }, hint: { zh: '关闭时仍可接收/执行工作，但回复无法投递；关闭来源不会清空已排队的工作或回复。', en: 'Off blocks delivery, not task execution. Disabling the source does not clear queued work or replies.' } },
       { key: 'directScope', type: 'select', label: { zh: '接收谁的私聊', en: 'Direct messages from' }, hint: { zh: '仅限发给本账号的私聊。哪些消息能建单由 Policy 的私聊行决定。', en: 'Only DMs to this account; use the DM Policy row for task admission.' }, options: [
-        { value: 'off', label: { zh: '不接收', en: 'Off' } }, { value: 'selected', label: { zh: '仅指定用户', en: 'Selected users' } },
+        { value: 'selected', label: { zh: '仅指定用户', en: 'Selected users' } },
         { value: 'all', label: { zh: '所有人（无需填写 ID）', en: 'Everyone messaging this account' } }] },
-      { key: 'directPeers', type: 'rows', visibleWhen: { key: 'directScope', equals: 'selected' }, label: { zh: '指定私聊用户', en: 'Selected direct peers' }, columns: [
+      { key: 'directPeers', type: 'rows', visibleWhen: { key: 'directScope', equals: 'selected' }, label: { zh: '指定私聊用户（留空不接收）', en: 'Selected DM users (empty means no DMs)' }, columns: [
         { key: 'id', type: 'text', label: { zh: '对方 openDingtalkId', en: 'Peer openDingtalkId' } },
         { key: 'name', type: 'text', optional: true, label: { zh: '显示名称', en: 'Display name' } }] },
       { key: 'allowDirectSend', type: 'switch', label: { zh: '允许原私聊回复', en: 'Allow replies in original DMs' },
@@ -219,7 +220,7 @@ export function createDingtalkKind(getContext: () => SourceContext): SourceKind<
         return [...groups.map(group => ({ id: group.id, label: group.name || group.id,
           note: group.listen === 'all' ? { zh: '全部消息', en: 'All messages' } : { zh: '仅 @', en: 'Mentions' },
           cells: { listedUnaddressed: group.listen === 'all', unlistedAddressed: true, unlistedUnaddressed: group.listen === 'all' } })),
-          ...(c.directScope !== 'off' ? [{ id: '$direct', label: { zh: '私聊', en: 'Direct messages' },
+          ...(receivesDirect(c) ? [{ id: '$direct', label: { zh: '私聊', en: 'Direct messages' },
             note: c.directScope === 'all' ? { zh: '所有人', en: 'Everyone' } : { zh: '指定用户', en: 'Selected users' },
             cells: { listedUnaddressed: false, unlistedAddressed: true, unlistedUnaddressed: false } }] : [])]
       },
@@ -250,7 +251,7 @@ export async function ingestDingtalkEvent(ctx: SourceContext, c: DingTalkConfig,
   client: DwsClient, current: () => boolean): Promise<void> {
   const ref = eventRef(value, sub), e = object(value)
   if (!current() || (ref.sender && [c.selfId,...c.selfIds].includes(ref.sender))) return
-  if ((!ref.direct && c.groupScope !== 'all') || (ref.direct && c.directScope === 'off')) return
+  if ((!ref.direct && c.groupScope !== 'all') || (ref.direct && !receivesDirect(c))) return
   await client.identity(ctx.state)
   const locator = !ref.sender || !(e.create_time || e.timestamp || e.event_time) ? await client.message(ref.cid, ref.mid) : undefined
   const sender = ref.sender || locator?.sender

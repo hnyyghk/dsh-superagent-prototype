@@ -16,6 +16,7 @@ export const DingTalkConfigSchema = z.object({
   selfIds: z.array(z.string().min(1)).default([]),
   allGroupListen: z.enum(['all', 'mentions']).default('all'),
   groupScope: z.enum(['selected', 'all']).default('selected'),
+  // Old records may omit the scope or persist 'off' with a dormant peer list.
   directScope: z.enum(['off', 'selected', 'all']).default('off'),
   directPeers: z.array(z.object({ id: z.string().trim().min(1), name: z.string().optional() }))
     .refine(peers => new Set(peers.map(p => p.id)).size === peers.length, 'Duplicate direct peer IDs').default([]),
@@ -29,7 +30,11 @@ export const DingTalkConfigSchema = z.object({
   overlapSeconds: z.number().int().min(5).max(300).default(30),
   initialLookbackSeconds: z.number().int().min(0).max(3600).default(0),
   allowSend: z.boolean().default(false),
-}).strict()
+}).strict().transform(c => ({
+  ...c,
+  directScope: c.directScope === 'all' ? 'all' as const : 'selected' as const,
+  directPeers: c.directScope === 'off' ? [] : c.directPeers,
+}))
 export type DingTalkConfig = z.infer<typeof DingTalkConfigSchema>
 export type Runner = Pick<Commands, 'run'>
 export type Json = Record<string, unknown>

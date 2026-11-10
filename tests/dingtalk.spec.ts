@@ -393,3 +393,24 @@ describe('AI send badge on the actual outbound DWS command', () => {
     })
   }
 })
+
+describe('selected DM users with an empty list', () => {
+  it('keeps missing/legacy off scopes closed, even with previously configured peers or reply permission', async () => {
+    const { subscriptions }=await import('../src/sources/dingtalk-stream.ts')
+    const { ingestDingtalkEvent }=await import('../src/sources/dingtalk.ts')
+    const peers=[{id:'human'}]
+    const h=host(async()=>{throw Error('disabled DMs must not call DWS')}),kind=createDingtalkKind(()=>h.ctx)
+    for (const input of [{}, {directScope:'off',directPeers:peers}, {directPeers:peers}, {directScope:'selected',directPeers:[]}]) {
+      const c=DingTalkConfigSchema.parse({...input,allowDirectSend:true})
+      expect([c.directScope,c.directPeers]).toEqual(['selected',[]])
+      expect(subscriptions(c)).toEqual([])
+      expect(kind.policy!.rows!(c).some(r=>r.id==='$direct')).toBe(false)
+      expect(kind.scope!({meta:{profile:c.profile,direct:true,peer:'human'}},c).listened).toBe(false)
+      const spec={keys:['user_im_message_receive_o2o'],peer:'human'}
+      await ingestDingtalkEvent(h.ctx,c,spec,{type:spec.keys[0],conversation_id:'dm1',message_id:'late',sender_open_dingtalk_id:'human'},new DwsClient(h.commands,c),()=>true)
+      const out=reply();Object.assign(out.channel.address,{profile:c.profile,direct:'true',peer:'human'})
+      await expect(sendDingtalk(h.ctx,h.commands,c,out)).rejects.toThrow('enablement')
+    }
+    expect(h.receive).not.toHaveBeenCalled();expect(h.commands.run).not.toHaveBeenCalled()
+  })
+})
