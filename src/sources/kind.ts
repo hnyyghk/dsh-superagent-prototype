@@ -8,7 +8,7 @@ import type { SourceContext, SourceHost } from './host.ts'
 
 export interface Localized { zh: string; en: string }
 /** `advanced` folds a rarely changed field (such as a polling tunable) behind the card's Advanced section. */
-interface FieldBase { key: string; label: Localized; hint?: Localized; advanced?: true }
+interface FieldBase { key: string; label: Localized; hint?: Localized; advanced?: true; visibleWhen?: { key: string; equals: string } }
 /**
  * Configuration field specification; `rows` edits a list of records keyed by its first column, `choose` picks from
  * resolved source labels, and `fact` displays a read-only value from `facts`.

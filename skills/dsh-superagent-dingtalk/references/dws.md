@@ -32,7 +32,7 @@ dws --profile '<returned profile>' chat message reply --group '<openConversation
 
 The send command advertises a 24-hour idempotency window. The adapter does not rely on that window for delayed retries: persisted intent/receipts prevent a second write; known task IDs are queried again. Unknown status is not successful delivery. Sending content containing inline Markdown images can cause the CLI to upload resources, so ordinary replies must not contain local-file image references.
 
-DWS also exposes `event consume` and `event +listen-im`. Their help/schema are inspectable without starting a listener. `event consume --dry-run` does not create a subscription; real consumption may create a personal subscription. Use exact group filters and graceful termination, never broad `--debug-raw-events` or `--force` as a workaround. The current Source uses polling and does not create a Stream subscription.
+DWS also exposes `event consume` and `event +listen-im`. Their help/schema are inspectable without starting a listener. `event consume --dry-run` does not create a subscription; real consumption may create a personal subscription. Use exact group filters and graceful termination, never broad `--debug-raw-events` or `--force` as a workaround. The source polls selected groups. For all groups or DMs it uses `event consume --flatten -f ndjson`: `user_im_message_receive_group_all`, `user_im_message_receive_o2o_all`, or `user_im_message_receive_o2o --open-dingtalk-id <peer>` for one selected DM peer. Only broad scopes explicitly selected by the operator create broad subscriptions.
 
 ## Current account and later verification
 

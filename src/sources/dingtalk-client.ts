@@ -14,6 +14,11 @@ export const DingTalkConfigSchema = z.object({
     sentAt: z.string().datetime({ offset: true }) }).strict().optional(),
   selfId: z.string().default(''),
   selfIds: z.array(z.string().min(1)).default([]),
+  groupScope: z.enum(['selected', 'all']).default('selected'),
+  directScope: z.enum(['off', 'selected', 'all']).default('off'),
+  directPeers: z.array(z.object({ id: z.string().trim().min(1), name: z.string().optional() }))
+    .refine(peers => new Set(peers.map(p => p.id)).size === peers.length, 'Duplicate direct peer IDs').default([]),
+  allowDirectSend: z.boolean().default(false),
   groups: z.array(z.object({ id: z.string().min(1), name: z.string().optional(), listen: z.enum(['mentions', 'all']).default('mentions') }))
     .refine(groups => new Set(groups.map(g => g.id)).size === groups.length, 'Duplicate conversation IDs').default([]),
   pollSeconds: z.number().int().min(10).max(3600).default(30),
@@ -134,9 +139,11 @@ export class DwsClient {
       throw unverified()
     }
   }
-  async messages(group: string, time: string, direction: 'newer' | 'older' = 'newer'): Promise<MessagePage> {
-    return messagePage(await this.call(['chat', 'message', 'list', '--conversation-id', group,
+  async messages(group: string, time: string, direction: 'newer' | 'older' = 'newer', peer?: string): Promise<MessagePage> {
+    const page = messagePage(await this.call(['chat', 'message', 'list', ...(peer ? ['--open-dingtalk-id', peer] : ['--conversation-id', group]),
       '--time', time, '--direction', direction, '--limit', String(this.config.pageSize)]), group)
+    if (peer && page.messages.some(m => (m.raw.conversationId ?? m.raw.openConversationId) !== group)) throw new DwsError('source_mismatch', 'Direct history did not confirm the original conversation')
+    return page
   }
   /** Group DWS expands @IDs into display names. Only its scoped @me index proves those mentions. */
   async markMentions(group: string, messages: DingMessage[]): Promise<void> {
@@ -168,6 +175,7 @@ export class DwsClient {
     if (!Array.isArray(value.messages)) throw new DwsError('schema_drift', 'DWS message lookup has no messages array')
     const found = value.messages.map(m => normalizeMessage(m, group)).find(m => m.id === id)
     if (!found) throw new DwsError('message_unavailable', 'The source message is unavailable to this DWS profile')
+    if ((found.raw.conversationId ?? found.raw.openConversationId) !== group) throw new DwsError('source_mismatch', 'DWS lookup did not confirm the original conversation')
     return found
   }
 }
@@ -181,7 +189,7 @@ export function messageTime(value: unknown): string {
   if (typeof value === 'number') ms = value > 1e12 ? value : value * 1000
   else {
     const text = string(value)
-    ms = Date.parse(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(?:\.\d+)?$/.test(text) ? text.replace(' ', 'T') + '+08:00' : text)
+    ms = /^(?:\d{10}|\d{13})$/.test(text) ? Number(text) * (text.length === 10 ? 1000 : 1) : Date.parse(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(?:\.\d+)?$/.test(text) ? text.replace(' ', 'T') + '+08:00' : text)
   }
   if (!Number.isFinite(ms)) throw new DwsError('schema_drift', 'DWS message lacks a valid creation timestamp')
   return new Date(ms).toISOString()

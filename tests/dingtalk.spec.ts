@@ -271,3 +271,82 @@ describe('outbox receipts', () => {
     expect(writes).toBe(1); expect(result.filter(r => r.status === 'fulfilled')).toHaveLength(1)
   })
 })
+
+describe('DingTalk conversation scopes', () => {
+  const event = (type: string, peer = 'human') => ({ type, conversation_id:'dm1', message_id:'m1',
+    sender_open_dingtalk_id:peer, timestamp:1793937600000, content:'untrusted event text' })
+  it('keeps existing scopes narrow and selects unfiltered all-direct/all-group keys only on opt-in', async () => {
+    const { subscriptions, streamArgs } = await import('../src/sources/dingtalk-stream.ts')
+    expect(subscriptions(config())).toEqual([])
+    const broad=DingTalkConfigSchema.parse({...config(),groups:[],directScope:'all',groupScope:'all'})
+    const specs=subscriptions(broad)
+    expect(specs).toEqual([{keys:['user_im_message_receive_group_all','user_im_message_receive_o2o_all']}])
+    expect(streamArgs(broad.profile,specs[0]!)).not.toContain('--open-dingtalk-id')
+    const selected=DingTalkConfigSchema.parse({...config(),directScope:'selected',directPeers:[{id:'peer-A'}]})
+    expect(streamArgs(selected.profile,subscriptions(selected)[0]!)).toContain('peer-A')
+    expect(broad.allowDirectSend).toBe(false)
+  })
+  it('routes inbound DM via verified peer history to a direct trigger and deduplicates on replay', async () => {
+    const { ingestDingtalkEvent }=await import('../src/sources/dingtalk.ts')
+    const { subscriptions }=await import('../src/sources/dingtalk-stream.ts')
+    const c=DingTalkConfigSchema.parse({...config(),groups:[],directScope:'selected',directPeers:[{id:'human'}]})
+    const h=host(async(_bin,args)=>{
+      if(args.includes('auth'))return JSON.stringify({authenticated:true})
+      expect(args).toContain('--open-dingtalk-id');expect(args).not.toContain('--conversation-id')
+      return JSON.stringify({messages:[row('m1',{conversationId:'dm1',text:'the real request'})],hasMore:false})
+    })
+    const kind=createDingtalkKind(()=>h.ctx),client=new DwsClient(h.commands,c), spec=subscriptions(c)[0]!
+    const run=(sender='human')=>ingestDingtalkEvent(h.ctx,c,spec,event(spec.keys[0]!,sender),client,()=>true)
+    await run('other');await run('self');expect(h.receive).not.toHaveBeenCalled()
+    await run();const t=h.receive.mock.calls[0]![0];expect(t).toMatchObject({addressed:'direct',human:true,text:'the real request',meta:{group:'dm1',direct:true,peer:'human'}})
+    expect(kind.scope!({meta:t.meta},c)).toMatchObject({listened:true,row:'$direct'})
+    expect(kind.scope!({meta:t.meta},config()).listened).toBe(false)
+    h.ctx.triggers.get=(id:string)=>id===t.id?t:undefined
+    await run();expect(h.receive).toHaveBeenCalledTimes(1)
+    await expect(dingtalkRead(h.commands,t,'around',undefined,config())).rejects.toThrow('no longer enabled')
+  })
+  it('receives a previously unlisted group only in all-group mode and never trusts the event sender type', async () => {
+    const { ingestDingtalkEvent }=await import('../src/sources/dingtalk.ts')
+    const c=DingTalkConfigSchema.parse({...config(),groups:[],groupScope:'all'})
+    const h=host(async(_bin,args)=>JSON.stringify(args.includes('auth')?{authenticated:true}
+      :{messages:[row('m1',{conversationId:'new-group',text:'<@self> automated',messageAiSendFlag:'DWS'})],hasMore:false}))
+    const ev={...event('user_im_message_receive_group_all'),conversation_id:'new-group'}
+    await ingestDingtalkEvent(h.ctx,c,{keys:[ev.type]},ev,new DwsClient(h.commands,c),()=>true)
+    const t=h.receive.mock.calls[0]![0];expect(t.human).toBe(false)
+    const scope=createDingtalkKind(()=>h.ctx).scope!
+    expect(scope({meta:t.meta},c)).toMatchObject({listened:true,row:'$all-groups',observed:true})
+    expect(scope({meta:t.meta},config()).listened).toBe(false)
+  })
+  it('never uses group permissions for DM sends or substitutes another peer',async()=>{
+    const cfg=DingTalkConfigSchema.parse({...config(),directScope:'all',allowSend:true})
+    const t=dingtalkTrigger(normalizeMessage(row('dm-msg',{conversationId:'dm1'}),'dm1'),cfg,undefined,true)!
+    const out={...reply(),channel:t.channel!}
+    const h=host(async(_bin,args)=>{
+      if(args.includes('auth'))return JSON.stringify({authenticated:true})
+      if(args.includes('+messages-mget'))return JSON.stringify({messages:[row('dm-msg',{conversationId:'dm1'})]})
+      expect(args).toContain('--open-dingtalk-id');expect(args).toContain('human');expect(args).not.toContain('--group')
+      return JSON.stringify({sendStatus:'SUCCESS',openConversationId:'dm1',openMessageId:'reply-dm'})
+    })
+    await expect(sendDingtalk(h.ctx,h.commands,cfg,out)).rejects.toThrow('enablement')
+    const allowed={...cfg,allowDirectSend:true,allowSend:false}
+    await expect(sendDingtalk(h.ctx,h.commands,allowed,reply())).rejects.toThrow('enablement')
+    await expect(sendDingtalk(h.ctx,h.commands,allowed,{...out,channel:{...out.channel,address:{...out.channel.address,peer:'other'}}})).rejects.toThrow('enablement')
+    expect(await sendDingtalk(h.ctx,h.commands,allowed,out)).toBe('sent')
+    expect(await sendDingtalk(h.ctx,h.commands,allowed,out)).toBe('sent')
+    expect(h.commands.run.mock.calls.filter(([,args])=>args.includes('send'))).toHaveLength(1)
+  })
+})
+
+it('reads DWS Stream readiness and NDJSON and stops the child on scope cancellation',async()=>{
+  const fs=await import('node:fs/promises'), os=await import('node:os'), path=await import('node:path')
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'ding-stream-')),cli=path.join(dir,'dws')
+  const {consumeStream}=await import('../src/sources/dingtalk-stream.ts')
+  try{
+    await fs.writeFile(cli,'#!/bin/sh\nprintf "[event] ready event_count=1\\n" >&2\nprintf \'{"message_id":"m1"}\\n\'\ncat >/dev/null\n',{mode:0o700})
+    const ctrl=new AbortController(), ready=vi.fn(), events:unknown[]=[]
+    const deadline=setTimeout(()=>ctrl.abort(),4000)
+    try{await consumeStream({...config(),cli},{keys:['user_im_message_receive_o2o_all']},ctrl.signal,ready,
+      async v=>{events.push(v);ctrl.abort()})}finally{clearTimeout(deadline)}
+    expect(ready).toHaveBeenCalledOnce();expect(events).toEqual([{message_id:'m1'}])
+  }finally{await fs.rm(dir,{recursive:true,force:true})}
+})
