@@ -54,6 +54,16 @@ profile必须保留返回原值：可能是 `corpId` 或 `corpId:userId`。clien
 dws auth login --device
 ```
 
+**Devix 网页 Claude Code**：不要把上面的交互长命令直接作为跨回合 Bash 任务。实测网页可在工具回合结束时 SIGTERM 登录进程（退出码 143），即使页面已打开，后续也不会完成交换。已有活跃登录先跟踪原进程；确认为无登录、无活跃流程后，用本 skill 的独立会话助手。以下变量在每次 Bash 调用中重新设置，目录每次授权尝试唯一，不能复用别人的记录：
+
+```sh
+# 先在本次私有工作区选定一个固定的 0700 目录；之后所有查询都用同一目录。
+python3 <skill>/scripts/device-login.py start --dir <本次私有目录> --cli "$(command -v dws)"
+python3 <skill>/scripts/device-login.py status --dir <同一目录> --handoff
+```
+
+start 立即返回，再执行也不会在同目录启动第二个登录。只把当前 device / pat 阶段的官方一次性链接交给用户；不要把带 --handoff 的输出写入共享日志。另一次 Bash 调用用 status 核实进程仍活着。用户完成设备授权后先读原目录的 status；若是 pat，仍由用户授权；若是 complete，再用集团/开源 CLI 的只读身份命令复核。failed/interrupted 时先查原进程，不复用失效链接、不自动重发设备码。输出终态后私有状态不再包含链接。
+
 由用户完成身份/组织选择和网页授权，助手不代替审批、不使用可信身份按钮偷换账号。可能有两个阶段：
 
 1. 设备OAuth授权。
