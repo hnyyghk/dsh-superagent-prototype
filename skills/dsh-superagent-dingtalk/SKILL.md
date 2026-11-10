@@ -26,7 +26,7 @@ If no original-message URL exists, retain the Trigger and message IDs instead.
 
 ## DWS identity and commands
 
-Start with [installation and shared login](references/initialization.md). Choose the open-source CLI or the Alibaba Group distribution at installation only. Reuse an active login for the intended account; otherwise let the user complete device authorization and any PAT prompt. Use the exact returned profile selector (corpId or corpId:userId). The CLI distribution does not establish which account is signed in.
+Start with [installation and shared login](references/initialization.md). If installation is needed and this request did not specify an edition, ask the user to choose the Group or open-source distribution before installing. Never infer that choice from the sandbox or a previous login. Reuse an active login for the intended account; otherwise let the user complete device authorization and any PAT prompt. Use the exact returned profile selector (corpId or corpId:userId). The CLI distribution does not establish which account is signed in.
 Both editions use the [same group setup guide](references/source-setup.md). Resolve the group and verified account from the active profile, save Source/Policy with receiving and sending off, then enable only the requested scope. For receive-only, keep sending disabled. A successful first poll is the configuration check; it is not a ticket test.
 
 **配置助手**：首次群轮询或已选择的事件订阅就绪后，主动询问一次「现在由真人在目标群或私聊发一条消息验证建单，还是暂时跳过？」只有用户选择测试才给出唯一测试码。按当前私聊、群 @ 或普通群消息模式验收一张工单；仅接收时不要求群回复，已授权发送时才核对投递。业务 worker 处理群任务时不发起这项引导。具体步骤和只读观察命令见上面的群配置指南。

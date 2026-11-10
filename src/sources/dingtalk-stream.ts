@@ -4,12 +4,13 @@ import { createInterface } from 'node:readline'
 import type { DingTalkConfig } from './dingtalk-client.ts'
 import { DwsError, object, string } from './dingtalk-client.ts'
 
+const GROUP_AT = 'user_im_message_receive_at'
 const ALL_GROUP = 'user_im_message_receive_group_all'
 const ALL_DIRECT = 'user_im_message_receive_o2o_all'
 const ONE_DIRECT = 'user_im_message_receive_o2o'
 export interface Subscription { keys: string[]; peer?: string }
 export function subscriptions(c: DingTalkConfig): Subscription[] {
-  const keys = [...(c.groupScope === 'all' ? [ALL_GROUP] : []), ...(c.directScope === 'all' ? [ALL_DIRECT] : [])]
+  const keys = [...(c.groupScope === 'all' ? [c.allGroupListen === 'mentions' ? GROUP_AT : ALL_GROUP] : []), ...(c.directScope === 'all' ? [ALL_DIRECT] : [])]
   return [...(keys.length ? [{ keys }] : []), ...(c.directScope === 'selected' ? c.directPeers.map(p => ({ keys: [ONE_DIRECT], peer: p.id })) : [])]
 }
 export function streamArgs(profile: string, sub: Subscription) {

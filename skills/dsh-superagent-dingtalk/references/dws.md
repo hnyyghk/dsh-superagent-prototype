@@ -32,7 +32,7 @@ dws --profile '<returned profile>' chat message reply --group '<openConversation
 
 The send command advertises a 24-hour idempotency window. The adapter does not rely on that window for delayed retries: persisted intent/receipts prevent a second write; known task IDs are queried again. Unknown status is not successful delivery. Sending content containing inline Markdown images can cause the CLI to upload resources, so ordinary replies must not contain local-file image references.
 
-DWS also exposes `event consume` and `event +listen-im`. Their help/schema are inspectable without starting a listener. `event consume --dry-run` does not create a subscription; real consumption may create a personal subscription. Use exact group filters and graceful termination, never broad `--debug-raw-events` or `--force` as a workaround. The source polls selected groups. For all groups or DMs it uses `event consume --flatten -f ndjson`: `user_im_message_receive_group_all`, `user_im_message_receive_o2o_all`, or `user_im_message_receive_o2o --open-dingtalk-id <peer>` for one selected DM peer. Only broad scopes explicitly selected by the operator create broad subscriptions.
+DWS also exposes `event consume` and `event +listen-im`. Their help/schema are inspectable without starting a listener. `event consume --dry-run` does not create a subscription; real consumption may create a personal subscription. Use exact group filters and graceful termination, never broad `--debug-raw-events` or `--force` as a workaround. The source polls selected groups. For all groups or DMs it uses `event consume --flatten -f ndjson`: `user_im_message_receive_group_all` (all group messages), `user_im_message_receive_at` (all groups, verified mentions only), `user_im_message_receive_o2o_all`, or `user_im_message_receive_o2o --open-dingtalk-id <peer>` for one selected DM peer. Only broad scopes explicitly selected by the operator create broad subscriptions.
 
 ## Current account and later verification
 
@@ -41,3 +41,8 @@ An empty profile list or unauthenticated local snapshot means DWS OAuth is still
 After confirming the intended account, follow the shared [group setup and acceptance guide](source-setup.md) for ID discovery, Source/Policy configuration, original-group readback and deduplication. Neither edition needs a second listener or a second send path.
 
 If enterprise capability or membership is denied, retain that error category and request the corresponding permission; repeated login, guessed profile IDs and changing TLS settings are not fixes.
+
+
+## 消息底部的「通过 AI 发送」
+
+这是钉钉客户端按 IM 产品标识渲染的角标，不是回复正文。集团版 DWS 1.0.67 的 `chat message send` 和 `reply` 默认启用 `--ai-tag`，可通过 `--dry-run` 查看请求的 `clawType`。在发送命令的进程环境中设置 `DWS_AGENT_PRODUCT` 可以传递产品标识，但不能指定任意中文角标文案；展示映射取决于钉钉服务端，不应承诺未开通的标识会显示。不要为核对角标而代发消息。见[官方参数说明](https://github.com/DingTalk-Real-AI/dingtalk-workspace-cli/blob/main/docs/reference.md)。

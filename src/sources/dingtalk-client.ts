@@ -14,6 +14,7 @@ export const DingTalkConfigSchema = z.object({
     sentAt: z.string().datetime({ offset: true }) }).strict().optional(),
   selfId: z.string().default(''),
   selfIds: z.array(z.string().min(1)).default([]),
+  allGroupListen: z.enum(['all', 'mentions']).default('all'),
   groupScope: z.enum(['selected', 'all']).default('selected'),
   directScope: z.enum(['off', 'selected', 'all']).default('off'),
   directPeers: z.array(z.object({ id: z.string().trim().min(1), name: z.string().optional() }))
@@ -146,9 +147,9 @@ export class DwsClient {
     return page
   }
   /** Group DWS expands @IDs into display names. Only its scoped @me index proves those mentions. */
-  async markMentions(group: string, messages: DingMessage[]): Promise<void> {
+  async markMentions(group: string, messages: DingMessage[], requireIndex = false): Promise<void> {
     const identities = [this.config.selfId, ...this.config.selfIds].filter(Boolean)
-    const unresolved = messages.filter(m => !identities.includes(m.sender) && !identities.some(id => m.text.includes(`<@${id}>`)))
+    const unresolved = messages.filter(m => !identities.includes(m.sender) && (requireIndex || !identities.some(id => m.text.includes(`<@${id}>`))))
     if (!unresolved.length) return
     const times = unresolved.map(m => Date.parse(m.at))
     const start = new Date(Math.min(...times) - 1000).toISOString(), end = new Date(Math.max(...times) + 1000).toISOString()

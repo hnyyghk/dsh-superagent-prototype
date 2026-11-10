@@ -350,3 +350,22 @@ it('reads DWS Stream readiness and NDJSON and stops the child on scope cancellat
     expect(ready).toHaveBeenCalledOnce();expect(events).toEqual([{message_id:'m1'}])
   }finally{await fs.rm(dir,{recursive:true,force:true})}
 })
+
+it('all groups uses the selected subscription and requires a verified mention ID in mentions-only mode',async()=>{
+  const {subscriptions}=await import('../src/sources/dingtalk-stream.ts')
+  const {ingestDingtalkEvent}=await import('../src/sources/dingtalk.ts')
+  const c=DingTalkConfigSchema.parse({...config(),groupScope:'all',allGroupListen:'mentions',groups:[]})
+  const [sub]=subscriptions(c);expect(sub!.keys).toEqual(['user_im_message_receive_at'])
+  let listed=false
+  const h=host(async(_bin,args)=>JSON.stringify(args.includes('auth') ? {authenticated:true} :
+    args.includes('list-mentions') ? {result:{conversationMessagesList:[{openConversationId:'g2',messages:listed?[{messageId:'x'}]:[]}],hasMore:false,nextCursor:'0'}} :
+      {messages:[row('x',{conversationId:'g2',text:'<@self> literal text is insufficient'})],hasMore:false}))
+  const run=()=>ingestDingtalkEvent(h.ctx,c,sub!,{type:sub!.keys[0],message_id:'x',conversation_id:'g2',sender_open_dingtalk_id:'human',timestamp:1793937600000},new DwsClient(h.commands,c),()=>true)
+  await run();expect(h.receive).not.toHaveBeenCalled()
+  listed=true;await run();const trigger=h.receive.mock.calls[0]![0];expect(trigger.addressed).toBe('mention')
+  const kind=createDingtalkKind(()=>h.ctx)
+  expect(kind.scope!({meta:trigger.meta},c)).toMatchObject({listened:true,observed:false,row:'$all-groups'})
+  expect(kind.policy!.rows!(c).find(r=>r.id==='$all-groups')?.cells.unlistedUnaddressed).toBe(false)
+  const legacy = DingTalkConfigSchema.parse({groupScope:'all'})
+  expect(legacy.allGroupListen).toBe('all');expect(subscriptions(legacy)[0]!.keys).toEqual(['user_im_message_receive_group_all'])
+})

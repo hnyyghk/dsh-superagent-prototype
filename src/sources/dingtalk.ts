@@ -166,6 +166,10 @@ export function createDingtalkKind(getContext: () => SourceContext): SourceKind<
         { key: 'id', type: 'text', label: { zh: 'openConversationId', en: 'openConversationId' } },
         { key: 'name', type: 'text', optional: true, label: { zh: '群名', en: 'Group name' } },
         { key: 'listen', type: 'select', label: { zh: '接收方式', en: 'Listen' }, options: [{ value: 'mentions', label: { zh: '仅 @', en: 'Mentions' } }, { value: 'all', label: { zh: '全部消息', en: 'All messages' } }] }] },
+      { key: 'allGroupListen', type: 'select', presentation: 'dropdown', visibleWhen: { key: 'groupScope', equals: 'all' },
+        label: { zh: '全部群接收方式', en: 'Receive in all groups' }, options: [
+          { value: 'all', label: { zh: '全部消息', en: 'All messages' } }, { value: 'mentions', label: { zh: '仅 @', en: 'Mentions only' } }] },
+      { key: 'allowSend', type: 'switch', label: { zh: '允许原群发送回复', en: 'Allow replies in source groups' }, hint: { zh: '关闭时仍可接收/执行工作，但回复无法投递；关闭来源不会清空已排队的工作或回复。', en: 'Off blocks delivery, not task execution. Disabling the source does not clear queued work or replies.' } },
       { key: 'directScope', type: 'select', label: { zh: '接收谁的私聊', en: 'Direct messages from' }, hint: { zh: '仅限发给本账号的私聊。哪些消息能建单由 Policy 的私聊行决定。', en: 'Only DMs to this account; use the DM Policy row for task admission.' }, options: [
         { value: 'off', label: { zh: '不接收', en: 'Off' } }, { value: 'selected', label: { zh: '仅指定用户', en: 'Selected users' } },
         { value: 'all', label: { zh: '所有人（无需填写 ID）', en: 'Everyone messaging this account' } }] },
@@ -174,13 +178,12 @@ export function createDingtalkKind(getContext: () => SourceContext): SourceKind<
         { key: 'name', type: 'text', optional: true, label: { zh: '显示名称', en: 'Display name' } }] },
       { key: 'allowDirectSend', type: 'switch', label: { zh: '允许原私聊回复', en: 'Allow replies in original DMs' },
         hint: { zh: '仅回复发起任务的原私聊，不影响原群回复。', en: 'Reply only to the original direct peer, independently of group replies.' } },
-      { key: 'allowSend', type: 'switch', label: { zh: '允许原群发送回复', en: 'Allow replies in source groups' }, hint: { zh: '关闭时仍可接收/执行工作，但回复无法投递；关闭来源不会清空已排队的工作或回复。', en: 'Off blocks delivery, not task execution. Disabling the source does not clear queued work or replies.' } },
       { key: 'pollSeconds', type: 'number', min: 10, max: 3600, label: { zh: '轮询间隔（秒）', en: 'Poll interval (seconds)' } },
     ],
     scope({ meta }, config) {
       if (meta.profile === config.profile) {
         if (meta.direct === true) return peerAllowed(config, meta.peer) ? { listened: true, observed: false, row: '$direct' } : { listened: false, reason: 'direct_messages_not_allowed' }
-        if (config.groupScope === 'all' && groupAllowed(config, meta.group)) return { listened: true, observed: true, row: '$all-groups' }
+        if (config.groupScope === 'all' && groupAllowed(config, meta.group)) return { listened: true, observed: config.allGroupListen === 'all', row: '$all-groups' }
         const group = config.groups.find(g => g.id === meta.group)
         if (group) return { listened: true, observed: group.listen === 'all', row: group.id }
       }
@@ -210,7 +213,7 @@ export function createDingtalkKind(getContext: () => SourceContext): SourceKind<
       explicit: { zh: '范围内、名单内真人 @ 公共账号或直接私聊时是明确请求；未知身份类型及AI消息不授予人类权限。', en: 'Only allowlisted, explicitly human senders mentioning or directly messaging this identity produce explicit requests; unknown/AI senders do not.' },
       rows(stored) {
         const c = DingTalkConfigSchema.parse(stored)
-        const groups = c.groupScope === 'all' ? [{ id: '$all-groups', name: '全部群', listen: 'all' }] : c.groups
+        const groups = c.groupScope === 'all' ? [{ id: '$all-groups', name: '全部群', listen: c.allGroupListen }] : c.groups
         return [...groups.map(group => ({ id: group.id, label: group.name || group.id,
           note: group.listen === 'all' ? { zh: '全部消息', en: 'All messages' } : { zh: '仅 @', en: 'Mentions' },
           cells: { listedUnaddressed: group.listen === 'all', unlistedAddressed: true, unlistedUnaddressed: group.listen === 'all' } })),
@@ -264,7 +267,11 @@ export async function ingestDingtalkEvent(ctx: SourceContext, c: DingTalkConfig,
   }
   if (!found || found.sender !== sender || (found.raw.conversationId ?? found.raw.openConversationId) !== ref.cid)
     throw new DwsError('event_scope', 'Original message not confirmed in its scoped DingTalk history')
-  if (!ref.direct) await client.markMentions(ref.cid, [found])
+  if (!ref.direct) {
+    const mentionsOnly = c.allGroupListen === 'mentions'
+    await client.markMentions(ref.cid, [found], mentionsOnly)
+    if (mentionsOnly && !found.mentionedSelf) return // (Even literal @-like text is not a scoped mention receipt.)
+  }
   await client.identity(ctx.state)
   if (!current()) return
   const parent = found.parent ? ctx.triggers.get(dingtalkTriggerId(c.profile, ref.cid, found.parent)) : undefined

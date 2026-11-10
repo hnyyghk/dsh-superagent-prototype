@@ -379,4 +379,9 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
 .dt-admission-cell .dt-select { flex: 1; min-width: 0; }
 .dt-admission-slot { display: inline-flex; flex: none; width: 16px; }
 .dt-info-warn { color: var(--dsw-alias-state-warn-primary); }
-.dt-field-segmented { max-width: 240px; }
+.dt-field-segmented { width: fit-content; min-width: min(240px, 100%); max-width: 100%; }
+.dt-field-segmented .dt-segment {
+  box-sizing: border-box; min-width: 0; height: auto; min-height: 28px; padding: 4px 10px;
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  white-space: normal; overflow-wrap: anywhere; line-height: 1.35;
+}
