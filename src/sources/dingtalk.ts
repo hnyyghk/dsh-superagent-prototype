@@ -106,7 +106,7 @@ export async function sendDingtalk(ctx: SourceContext, commands: Runner, config:
       : address.refSender && address.messageId
       ? ['chat', 'message', 'reply', '--group', address.group!, '--ref-msg-id', address.messageId, '--ref-sender', address.refSender, '--uuid', deliveryKey(message.id)]
       : ['chat', 'message', 'send', '--conversation-id', address.group!, '--idempotency-key', deliveryKey(message.id)]
-    const result = await client.call([...args, '--content', message.text, '--yes'])
+    const result = await client.call([...args, `--ai-tag=${config.showAiTag}`, '--content', message.text, '--yes'])
     const body = payload(result), confirmed = delivered(result, address.group!)
     receipt = { ...receipt!, ...(string(body.openTaskId) ? { taskId: string(body.openTaskId) } : {}), ...(confirmed ? { messageId: confirmed } : {}) }
     ctx.state.set(id, receipt)
@@ -178,6 +178,8 @@ export function createDingtalkKind(getContext: () => SourceContext): SourceKind<
         { key: 'name', type: 'text', optional: true, label: { zh: '显示名称', en: 'Display name' } }] },
       { key: 'allowDirectSend', type: 'switch', label: { zh: '允许原私聊回复', en: 'Allow replies in original DMs' },
         hint: { zh: '仅回复发起任务的原私聊，不影响原群回复。', en: 'Reply only to the original direct peer, independently of group replies.' } },
+      { key: 'showAiTag', type: 'switch', label: { zh: '显示 AI 发送角标', en: 'Show AI send badge' },
+        hint: { zh: '群聊和私聊回复共用。仅影响之后发送的消息，不改变回复权限。', en: 'Applies to future group and direct replies. Does not enable sending.' } },
       { key: 'pollSeconds', type: 'number', min: 10, max: 3600, label: { zh: '轮询间隔（秒）', en: 'Poll interval (seconds)' } },
     ],
     scope({ meta }, config) {

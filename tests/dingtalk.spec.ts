@@ -369,3 +369,27 @@ it('all groups uses the selected subscription and requires a verified mention ID
   const legacy = DingTalkConfigSchema.parse({groupScope:'all'})
   expect(legacy.allGroupListen).toBe('all');expect(subscriptions(legacy)[0]!.keys).toEqual(['user_im_message_receive_group_all'])
 })
+
+describe('AI send badge on the actual outbound DWS command', () => {
+  for (const route of ['group','quoted group','direct'] as const) {
+    it.each([true,false])(`${route} forwards the configured badge (%s) without resending receipts`, async show => {
+      // Omitting the new field exercises settings saved before the badge switch existed.
+      const cfg = DingTalkConfigSchema.parse({ ...config(), allowSend: true, allowDirectSend: true,
+        directScope: 'all', showAiTag: show ? undefined : false })
+      const out=reply(), address=out.channel.address
+      if (route==='quoted group') address.refSender='human'
+      if (route==='direct') Object.assign(address,{direct:'true',peer:'human',group:'dm1'})
+      const h=host(async (_bin,args)=>{
+        if(args.includes('auth'))return JSON.stringify({authenticated:true})
+        if(args.includes('+messages-mget'))return JSON.stringify({messages:[row('m1',{conversationId:'dm1'})]})
+        expect(args.filter(a=>a.startsWith('--ai-tag'))).toEqual(['--ai-tag='+show])
+        expect(args).toContain(route==='quoted group'?'reply':'send')
+        expect(args).toContain(route==='direct'?'--open-dingtalk-id':route==='group'?'--conversation-id':'--ref-msg-id')
+        return JSON.stringify({sendStatus:'SUCCESS',openConversationId:address.group,openMessageId:'sent'})
+      })
+      expect(await sendDingtalk(h.ctx,h.commands,cfg,out)).toBe('sent')
+      expect(await sendDingtalk(h.ctx,h.commands,{...cfg,showAiTag:!show},out)).toBe('sent')
+      expect(h.commands.run.mock.calls.filter(([,a])=>a.includes('send')||a.includes('reply'))).toHaveLength(1)
+    })
+  }
+})

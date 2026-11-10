@@ -50,7 +50,7 @@ The current adapter returns resource references; it does not automatically downl
 
 Use `orchestrator_report` and `human_action` for work results and questions; the native orchestrator/outbox owns channel delivery.
 Do not also call a CLI send/reply from a worker, which would duplicate the host reply.
-Group replies and DM replies have separate switches, both off by default. A DM reply goes only to the original verified peer, and its receipt must identify the original DM conversation. Do not use the group switch or a group ID to configure DMs.
+Group replies and DM replies have separate permission switches, both off by default. The independent “显示 AI 发送角标” switch (`showAiTag`, default on) controls the explicit `--ai-tag=true|false` on every new group or direct send, including quoted replies; it does not grant send permission or resend existing deliveries. A DM reply goes only to the original verified peer, and its receipt must identify the original DM conversation. Do not use the group switch or a group ID to configure DMs.
 The outbox replies in the original group; it uses a native quote only when the source explicitly supplies the sender's openDingTalkId.
 A generic senderId is not assumed to be an openDingTalkId; otherwise the response is an ordinary message in the original group.
 An openTaskId is acceptance of a send task, not confirmed delivery: query that same task until an explicit success/delivered status with a message ID is observed.

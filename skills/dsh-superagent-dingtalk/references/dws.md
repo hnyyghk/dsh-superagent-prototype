@@ -45,4 +45,6 @@ If enterprise capability or membership is denied, retain that error category and
 
 ## 消息底部的「通过 AI 发送」
 
-这是钉钉客户端按 IM 产品标识渲染的角标，不是回复正文。集团版 DWS 1.0.67 的 `chat message send` 和 `reply` 默认启用 `--ai-tag`，可通过 `--dry-run` 查看请求的 `clawType`。在发送命令的进程环境中设置 `DWS_AGENT_PRODUCT` 可以传递产品标识，但不能指定任意中文角标文案；展示映射取决于钉钉服务端，不应承诺未开通的标识会显示。不要为核对角标而代发消息。见[官方参数说明](https://github.com/DingTalk-Real-AI/dingtalk-workspace-cli/blob/main/docs/reference.md)。
+在 Superagent 设置 → 来源 → 钉钉（DWS）中切换「显示 AI 发送角标」（默认开启），群普通发送、群引用回复及原私聊回复会按该配置显式传入 `--ai-tag=true` 或 `--ai-tag=false`。开关只控制是否展示，不定制文案，也不改变收发授权。已投递的消息不更新，已受理的发送任务只查询原回执。
+
+这是钉钉客户端渲染的角标，不是回复正文。集团版 DWS 1.0.67 的 `chat message send` 和 `reply` 默认启用 `--ai-tag`，可通过 `--dry-run` 查看请求的 `clawType`。在发送命令的进程环境中设置 `DWS_AGENT_PRODUCT` 可以传递产品标识，但不能指定任意中文角标文案；展示映射取决于钉钉服务端，不应承诺未开通的标识会显示。不要为核对角标而代发消息。见[官方参数说明](https://github.com/DingTalk-Real-AI/dingtalk-workspace-cli/blob/main/docs/reference.md)。

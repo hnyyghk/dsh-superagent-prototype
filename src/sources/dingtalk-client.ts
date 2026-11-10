@@ -20,6 +20,7 @@ export const DingTalkConfigSchema = z.object({
   directPeers: z.array(z.object({ id: z.string().trim().min(1), name: z.string().optional() }))
     .refine(peers => new Set(peers.map(p => p.id)).size === peers.length, 'Duplicate direct peer IDs').default([]),
   allowDirectSend: z.boolean().default(false),
+  showAiTag: z.boolean().default(true),
   groups: z.array(z.object({ id: z.string().min(1), name: z.string().optional(), listen: z.enum(['mentions', 'all']).default('mentions') }))
     .refine(groups => new Set(groups.map(g => g.id)).size === groups.length, 'Duplicate conversation IDs').default([]),
   pollSeconds: z.number().int().min(10).max(3600).default(30),
