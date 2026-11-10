@@ -21,7 +21,7 @@ dws version
 **阿里集团版**：使用集团提供的发布入口，安装后核对 `Edition: ali` 或 `ali dws version`。仅在确实需要安装时执行：
 
 ```sh
-pkill -f esa-agent || true
+pkill -f '[e]sa-agent' || true
 curl -fsSL https://aliding-ai-oss.oss-cn-wulanchabu.aliyuncs.com/dws/binary/latest/install.sh | sh
 ```
 
@@ -48,7 +48,7 @@ profile必须保留返回原值：可能是 `corpId` 或 `corpId:userId`。clien
 
 ## 3. 必要时交接授权
 
-确认没有目标账号的有效登录时，在目标组织支持的登录环境中执行下面的命令。若组织要求可信应用和云壳，应从该受支持入口启动。
+确认没有目标账号的有效登录后，先区分宿主。**Devix 网页 Claude Code 直接走下方独立助手**；只有操作者可保持打开的交互终端才执行下面的命令。若组织要求可信应用和云壳，应从该受支持入口启动。
 
 ```sh
 dws auth login --device

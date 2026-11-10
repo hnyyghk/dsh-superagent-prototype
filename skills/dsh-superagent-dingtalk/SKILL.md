@@ -7,6 +7,14 @@ description: Set up and verify a DingTalk group and direct-message source with o
 
 Aone 发布包的 `assets/prototype-source.zip` 是本修改版仓库指定 Git 提交的完整源码快照，含原生钉钉 Source、其他来源、构建锁、文档与测试；`assets/prototype-source.json` 记录提交、文件数及 SHA-256。仅排除 Git 历史和未跟踪内容（包括依赖、机器配置和凭据）；发布时生成的归档不会递归包含自身。使用 `a1 skill install dsh-superagent-dingtalk` 按名称获取 Aone prod 的 latest，无需填写版本。安装 skill 只下载说明和源码，不会启动 Superagent、登录 DWS 或收发消息。新版 `devix-superagent` 每次新建部署计划时解析本包的最新发布版、校验源码，仅在本次 plan 记录实际版本供复现。已有实例可使用最新版引导，操作前核对该实例实际支持的功能；获取新说明不自动升级正在运行的适配器。
 
+## 安装助手：一次正常接入
+
+1. 先确定本次账号、会话范围与原会话回复权限；初次安装才询问发行版。Devix 网页的首次登录用 [独立设备授权助手](references/initialization.md)，在同一目录接续 device/PAT；不要先跑前台登录再等 143 后重试。
+2. 沙箱内只走[原生配置接口](references/source-setup.md)，不猜路由、不改 SQLite。先在关闭状态保存 Source，再用包内 `scripts/native-policy.py` 按 revision 合并 Policy 并读取**持久化的准入字符串**。UI 的布尔 cells 表示支持哪些选项，不代表授予了什么权限。
+3. 只按授权开启接收/回复，并核对当前 runtime、DWS health 及所选方式的首次成功轮询或 Stream ready。这就完成配置。真人群/私聊建单在单独选择后才执行一次；明确跳过或未回复均不自动发测试消息。常规接入不重启、不扫描其他实例做演练、不重复已通过的基础 MSP 工单。
+
+## 业务 worker：处理已有 Trigger
+
 A worker receives the original Trigger. Read `trigger/<id>` with `orchestrator_read` when its text is cut or ambiguous.
 Its context references point to `dingtalk/<trigger-id>/message`, `/parent` when a quoted parent ID exists, `/thread` when DWS publishes a native topic ID, and `/around` for bounded conversation history.
 For requests such as “fix the above”, read the source, quoted parent/forwarded messages and relevant surrounding context before implementing.

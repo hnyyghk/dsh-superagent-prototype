@@ -41,7 +41,7 @@ DWS 可以查群，不能列出正在轮询这个群的 Superagent。若本次�
 | 群内所有真人，普通消息也可发起 | listen=all；该群 listedUnaddressed、unlistedUnaddressed 设为 inferred。如果同一批人的 @ 请求也按意图判断，unlistedAddressed 同样为 inferred。研判为 auto，并保留一条限本群、仅匹配明确可执行任务的启用规则。闲聊、账号自己的消息和 AI 消息不能作为真人授权。 |
 | 仅接收 / 同时允许原群回复 | 仅接收保持 allowSend=false；只有明确允许向该群发送时才设为 true。关闭回复不会阻止建单；以后开启前审阅待发 Outbox。 |
 
-若用户只要准备配置，就留在关闭状态。要求启用接收时，仅在指定群、账号和范围上启用，确认运行未暂停、服务 ready、首次成功轮询游标已落盘。此时可报告「接收已启用」，还不能报告真人任务已完成。仅指定群模式不会建立 Stream；全量群或私聊模式由来源自动管理所需订阅，不再手动开一个 CLI 监听器。
+若用户只要准备配置，就留在关闭状态。要求启用接收时，仅在指定会话范围内启用，确认运行未暂停、服务及 DWS ready：指定群核对首次成功轮询游标，Stream 模式核对同一 profile 下本次选择的事件订阅已连接，无需等待新消息。此时可报告「接收已启用」，还不能报告真人任务已完成。仅指定群模式不会建立 Stream；全量群或私聊模式由来源自动管理所需订阅，不再手动开一个 CLI 监听器。
 
 ### 通过 Devix 的 Claude Code 对话保存原生配置
 
@@ -52,7 +52,23 @@ DWS 可以查群，不能列出正在轮询这个群的 Superagent。若本次�
 3. 全群与私聊的 Policy 行分别是字面量 `$all-groups`、`$direct`，不是数组或自造层级。若本次明确允许所有真人的明确任务且无需 @，全群行的 `listedUnaddressed`、`unlistedUnaddressed`、`unlistedAddressed` 和私聊行的 `unlistedAddressed` 可以设为 `"inferred"`，并追加限本次授权范围的启用规则。已有规则不删除。只允许 @、指定群或指定用户时按对应范围和授权设置，不默认扩大。
 4. 关闭态配置回读一致后，按授权 PUT 同一 source 块开启接收和相应回复。GET `state` 确认 runtime 和 dingtalk 实际 ready，使用相同 profile 的 DWS event status 区分“有配置”和“订阅已连接”。若需要检查原工单，可 GET `tickets/<id>`。只有业务真人测试才需要新工单。
 
-## 3. 首次轮询成功后，单独征询一次
+**Devix Policy 保存与验收命令**：用本次沙箱 plan，先 GET settings 取得 **Policy 块** revision（不是 Source 或全局 revision）。保存授权意图到私有 JSON 文件；使用文件编辑器或单引号 heredoc，保留 `$all-groups` 和 `$direct` 的字面值。仅在用户明确选择「全部群普通真人任务 + 所有人私聊」时，意图才形如：
+
+```json
+{"admission":{"$all-groups":{"listedUnaddressed":"inferred","unlistedUnaddressed":"inferred","unlistedAddressed":"inferred"},"$direct":{"unlistedAddressed":"inferred"}}}
+```
+
+按实际 Source 选择相应行；指定群使用 DWS 返回的群 ID。若没有匹配本次任务意图的启用规则，可在同一文件添加 `rule: {id,name,enabled:true,instruction}`；仅在明确要更新准入名单时包含 `allowed`。未提供的规则、名单及其他来源保持原值。
+
+```sh
+python3 <skill>/scripts/native-policy.py save --plan <plan.json> --intent <intent.json> --revision <当前Policy修订号> --backup <新的私有备份文件>
+# 已有配置或上次写响应丢失时，只读核对；save 成功已做同样的回读，不必重复。
+python3 <skill>/scripts/native-policy.py check --plan <plan.json> --intent <intent.json>
+```
+
+`POLICY_VERIFIED` 核对的是 `settings.blocks.policy.value.sources.dingtalk.admission` 的实际字符串和值；不是 `sources[].policy.rows[].cells` 的 true/false，也不代表 Stream 已连接。用于自动研判时还需核对 eval.mode=auto、匹配规则已启用；失败先比对意图和 revision，不能直接写库。不要用独立会话重复配置或只为验证再写一遍。
+
+## 3. 接收就绪后，单独征询一次
 
 若本次尚未决定，主动询问：「要由真人在目标群发送一条测试消息，验证能否自动建单吗？**现在测试 / 暂时跳过**」。未答复或跳过就结束 DWS 配置，不发消息、不建测试工单；已明确选择的直接走对应分支。由 devix-superagent 引导时，把结果交回主流程继续可选迁移，不再次询问同一个测试。已有配置的状态查询不会触发此邀请。
 
@@ -62,10 +78,10 @@ DWS 可以查群，不能列出正在轮询这个群的 Superagent。若本次�
 
 私聊联调由获准的对端在原私聊发一次相同编号，无需 @；看一张 completed 工单、报告 ready 和 proof，只有原私聊回复开关已获授权才核对原对端和投递回执。下方基于群轮询游标的观察器只用于指定群，不用于私聊或全群事件。
 
-只有该群已允许回复且此次要验证投递时，再加「完成后在本群回复该编号」。以群、senderId、编号和原消息 ID 定位 Trigger，沿 decision.triggerIds、ticket.origin 确认一次 accept、一个 completed 工单、worker 报告 ready 和本工单目录 proof；同一实例再观察两次成功游标推进，不能重发输入来验证去重。
+只有该群已允许回复且此次要验证投递时，再加「完成后在本群回复该编号」。以群、senderId、编号和原消息 ID 定位 Trigger，沿 decision.triggerIds、ticket.origin 确认一次 accept、一个 completed 工单、worker 报告 ready 和本工单目录 proof；指定群轮询在完成后再观察两个成功游标。Stream 没有这个群轮询游标：确认相应订阅仍 active，再按同一 messageId 复查 Trigger、accept、工单、最终回复计数；不重投消息。
 
 - **仅接收**：在工单和产物验收，不要求 Outbox 回执，不为测试开启发送。其他实例发的群回复不能算作本实例的结果。
-- **允许回复并验证投递**：跟踪本工单 Outbox。ack 是接单提示，只有一条含编号的最终回复；有 openTaskId 时仅查询原任务，确认成功并按 messageId 在原群读回，核对账号和编号。自己的回复不得再次建单；投递不确定时不可重发。参见 [DWS 命令](dws.md)。
+- **允许回复并验证投递**：跟踪本工单 Outbox。ack 是接单提示，只有一条含编号的最终回复；有 openTaskId 时仅查询原任务，确认成功并按 messageId 在原会话读回，核对账号和编号。自己的回复不得再次建单；投递不确定时不可重发。参见 [DWS 命令](dws.md)。
 
 受管 Devix 实例可从钉钉 skill 目录运行只读观察器（独立安装可用原生面板及群回读核对相同证据）：
 
