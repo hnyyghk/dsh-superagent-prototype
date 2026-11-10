@@ -43,6 +43,15 @@ DWS 可以查群，不能列出正在轮询这个群的 Superagent。若本次�
 
 若用户只要准备配置，就留在关闭状态。要求启用接收时，仅在指定群、账号和范围上启用，确认运行未暂停、服务 ready、首次成功轮询游标已落盘。此时可报告「接收已启用」，还不能报告真人任务已完成。仅指定群模式不会建立 Stream；全量群或私聊模式由来源自动管理所需订阅，不再手动开一个 CLI 监听器。
 
+### 通过 Devix 的 Claude Code 对话保存原生配置
+
+在当前沙箱的 Bash 使用实际 plan 的 `network.webPort` 和 `http://127.0.0.1:<webPort>/orchestrator/api/`。这是管理 API，不是办公网代理；本机请求带 `x-orchestrator-request: 1`，绕过继承的 HTTP 代理，不读取或传递私人入口 token。**只通过原生 API 改配置，不直接写 SQLite、版本指针或历史记录**。路径错误、400、409、校验失败或服务不可用时停止写入并重新读接口/源码，不能改库绕过。
+
+1. GET `settings`、`state`。Source 块取 `settings.sources` 中 id=dingtalk 的行；Policy 块取 `settings.blocks.policy`。将两块原值和各自 revision 存入本实例 0600 备份。读取 Outbox 时只核对本次范围的待发数，不打印正文。若有未知旧投递，不直接开启发送。
+2. PUT `settings/source:dingtalk`，JSON 外层是 `{"revision":本块当前修订号,"value":{"enabled":false,"config":合并后的完整配置}}`；PUT `settings/policy` 使用 Policy 块自己的 revision 和合并后的完整 value，保留其他来源、rules 和 allowed。每次成功重新 GET settings 取得最新值和修订号；发生冲突不覆盖并发修改。
+3. 全群与私聊的 Policy 行分别是字面量 `$all-groups`、`$direct`，不是数组或自造层级。若本次明确允许所有真人的明确任务且无需 @，全群行的 `listedUnaddressed`、`unlistedUnaddressed`、`unlistedAddressed` 和私聊行的 `unlistedAddressed` 可以设为 `"inferred"`，并追加限本次授权范围的启用规则。已有规则不删除。只允许 @、指定群或指定用户时按对应范围和授权设置，不默认扩大。
+4. 关闭态配置回读一致后，按授权 PUT 同一 source 块开启接收和相应回复。GET `state` 确认 runtime 和 dingtalk 实际 ready，使用相同 profile 的 DWS event status 区分“有配置”和“订阅已连接”。若需要检查原工单，可 GET `tickets/<id>`。只有业务真人测试才需要新工单。
+
 ## 3. 首次轮询成功后，单独征询一次
 
 若本次尚未决定，主动询问：「要由真人在目标群发送一条测试消息，验证能否自动建单吗？**现在测试 / 暂时跳过**」。未答复或跳过就结束 DWS 配置，不发消息、不建测试工单；已明确选择的直接走对应分支。由 devix-superagent 引导时，把结果交回主流程继续可选迁移，不再次询问同一个测试。已有配置的状态查询不会触发此邀请。
